@@ -18,13 +18,11 @@ source ~/.bashrc
 export PYTHONUNBUFFERED=1
 export PYTHONDONTWRITEBYTECODE=1
 
-# --- Optional: repo-root import path (disabled by default) -------------------
-# Uncomment ONLY if this repo needs its repo-root modules importable when
-# commands run from a subdirectory without installing the repo -- most commonly
-# a repo-root package imported package-qualified (e.g. `import mypkg.thing`),
-# or scripts under tools/ or tests/ that import repo-root modules.
-# Must come after sourcing ~/.bashrc, which clears PYTHONPATH.
+# --- Repo-root import path (required) ---------------------------------------
+# Scripts live in extract/, cleanup/, and audit/ and import the sibling
+# repo-root modules markdown_quality and pdf_extract. Must come after sourcing
+# ~/.bashrc, which clears PYTHONPATH.
 # Assumes the repo is inside a Git work tree (git rev-parse).
-#REPO_ROOT="$(git rev-parse --show-toplevel)"
-#export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
-#unset REPO_ROOT
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+unset REPO_ROOT

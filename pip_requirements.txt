@@ -1,0 +1,9 @@
+# Runtime dependencies for the conversion/validation/auditing tools at repo root.
+PyMuPDF         # PDF text-layer extraction (import fitz) and OCR bridge
+lxml            # EPUB/HTML structure parsing (epub_structure.py)
+PyYAML          # metadata / frontmatter blocks
+markdown-it-py  # block-aware Markdown validation (validate_markdown_v2.py)
+
+# Optional MathML-to-LaTeX backends (mathml_to_latex.py imports them lazily):
+# mathml-to-latex
+# sympy

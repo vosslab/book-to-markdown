@@ -1,3 +1,4 @@
+import os
 import sys
 
 import file_utils
@@ -8,6 +9,14 @@ import file_utils
 _repo_root = file_utils.get_repo_root()
 if _repo_root not in sys.path:
 	sys.path.insert(0, _repo_root)
+
+# Scripts are grouped into stage folders (extract/, cleanup/, audit/) that
+# tests import by bare module name; add them to sys.path so no pytest.ini
+# pythonpath section is needed.
+for _stage in ("extract", "cleanup", "audit"):
+	_stage_path = os.path.join(_repo_root, _stage)
+	if _stage_path not in sys.path:
+		sys.path.insert(0, _stage_path)
 
 
 # Exclude both end-to-end tiers from pytest collection. tests/playwright/
