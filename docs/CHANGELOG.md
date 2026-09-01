@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## 2026-08-29
+
+### Fixes and Maintenance
+- Restored `extract/pdf_to_markdown.py` as the qualified Tesseract OCR entry point, sharing the established OCR extraction, page cleanup, removal-sidecar, and JSON-evidence behavior.
+- Documented the Tesseract environment used by the qualified PDF path and added a CLI-contract test.
+
 ## 2026-08-18
 
 ### Added

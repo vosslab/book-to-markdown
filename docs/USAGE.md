@@ -4,6 +4,9 @@ One paragraph: run the toolchain from the repo root after sourcing `source_me.sh
 
 ## Quick start
 
+- Convert a scanned or degraded PDF through the qualified OCR path:
+  - `TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata python3 extract/pdf_to_markdown.py book.pdf -o /tmp/book.raw.md`
+  - `python3 cleanup/clean_markdown.py -i /tmp/book.raw.md -o /tmp/book.clean.md`
 - Convert a PDF with real text layer:
   - `python3 extract/pdf_raw_text_extraction_to_markdown.py book.pdf -o /tmp/book.raw.md`
   - `python3 cleanup/clean_markdown.py -i /tmp/book.raw.md -o /tmp/book.clean.md`
@@ -14,6 +17,7 @@ One paragraph: run the toolchain from the repo root after sourcing `source_me.sh
 
 ## Extract
 
+- `extract/pdf_to_markdown.py` - qualified Tesseract OCR entry point for source-faithful PDF recovery.
 - `extract/pdf_raw_text_extraction_to_markdown.py` - PDF text-layer extraction.
 - `extract/pdf_ocr_text_extraction_to_markdown.py` - OCR extraction for image-only PDFs.
 - `extract/epub_structure.py` - inspect and repair EPUB heading structure.
