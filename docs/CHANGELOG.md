@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## 2026-09-12
+
+### Additions and New Features
+
+- Added `extract/azw3_to_markdown.py` for unencrypted Mobipocket/AZW3 v8 HuffDic text records.
+
+### Fixes and Maintenance
+
+- Synchronized shared style guides, tests, and repository support files from the starter template.
+
+### Developer Tests and Notes
+
+- Added a source-SHA-bound E2E characterization for The Way of the Superior Man.
+
 ## 2026-09-08
 
 ### Behavior or Interface Changes
