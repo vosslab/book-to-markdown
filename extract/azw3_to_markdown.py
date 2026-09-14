@@ -5,8 +5,14 @@
 import argparse
 import html.parser
 import pathlib
+import posixpath
 import re
 import struct
+import zipfile
+
+# PIP3 modules
+import lxml.etree
+import mobi
 
 
 HUFF_COMPRESSION = 0x4448
@@ -163,8 +169,8 @@ class HuffDicReader:
 
 
 #============================================
-def extract_azw3_text(source_path: pathlib.Path) -> str:
-	"""Decode ordered unencrypted AZW3 v8 text records from one source file."""
+def huffdic_header(source_path: pathlib.Path) -> tuple[bytes, bytes, list[int], int]:
+	"""Load the source header and validate its supported unencrypted HuffDic contract."""
 	data = source_path.read_bytes()
 	offsets = record_offsets(data)
 	header = record_bytes(data, offsets, 0)
@@ -172,9 +178,21 @@ def extract_azw3_text(source_path: pathlib.Path) -> str:
 		raise ValueError("source is not a Mobipocket/AZW3 document")
 	if read_u32(header, MOBI_HEADER_OFFSET + 20) != 8:
 		raise ValueError("only Mobipocket/AZW3 version 8 is supported")
-	compression = read_u16(header, 0)
-	if compression != HUFF_COMPRESSION:
-		raise ValueError("only unencrypted Mobipocket HuffDic text is supported")
+	if read_u16(header, 0) != HUFF_COMPRESSION:
+		raise ValueError("only Mobipocket HuffDic text is supported")
+	if read_u16(header, 12) != 0:
+		raise ValueError("encrypted Mobipocket/AZW3 text is not supported")
+	declared_bytes = read_u32(header, 4)
+	if declared_bytes == 0:
+		raise ValueError("AZW3 source declares zero PalmDOC text bytes")
+	result = (data, header, offsets, declared_bytes)
+	return result
+
+
+#============================================
+def extract_huffdic_bytes(source_path: pathlib.Path) -> bytes:
+	"""Decode native HuffDic records only when their bytes match PalmDOC framing."""
+	data, header, offsets, declared_bytes = huffdic_header(source_path)
 	text_record_count = read_u16(header, 8)
 	huff_record_index = read_u32(header, MOBI_HEADER_OFFSET + MOBI_HUFF_RECORD_OFFSET)
 	huff_record_count = read_u32(header, MOBI_HEADER_OFFSET + MOBI_HUFF_RECORD_COUNT)
@@ -189,7 +207,66 @@ def extract_azw3_text(source_path: pathlib.Path) -> str:
 	]
 	decoder = HuffDicReader(huff_record, cdic_records)
 	chunks = [decoder.unpack(record_bytes(data, offsets, index)) for index in range(1, text_record_count + 1)]
-	text = b"".join(chunks).decode("utf-8", errors="replace")
+	decoded = b"".join(chunks)
+	if len(decoded) > declared_bytes:
+		raise ValueError("AZW3 HuffDic output exceeds PalmDOC declared text bytes")
+	if len(decoded) < declared_bytes:
+		raise ValueError("AZW3 HuffDic output is shorter than PalmDOC declared text bytes")
+	return decoded
+
+
+#============================================
+def xml_local_name(tag: str | object) -> str:
+	"""Return a namespace-free element name or an empty non-element sentinel."""
+	if not isinstance(tag, str):
+		return ""
+	name = tag.rsplit("}", 1)[-1]
+	return name
+
+
+#============================================
+def epub_spine_html(epub_path: pathlib.Path) -> str:
+	"""Return body XHTML in the source EPUB's declared reading order."""
+	with zipfile.ZipFile(epub_path) as archive:
+		container = lxml.etree.fromstring(archive.read("META-INF/container.xml"))
+		rootfile = next(
+			element for element in container.iter()
+			if xml_local_name(element.tag) == "rootfile"
+		)
+		opf_path = rootfile.attrib["full-path"]
+		opf_root = lxml.etree.fromstring(archive.read(opf_path))
+		manifest = {
+			element.attrib["id"]: posixpath.normpath(
+				posixpath.join(posixpath.dirname(opf_path), element.attrib["href"].split("#", 1)[0])
+			)
+			for element in opf_root.iter()
+			if xml_local_name(element.tag) == "item"
+		}
+		spine = [
+			manifest[element.attrib["idref"]]
+			for element in opf_root.iter()
+			if xml_local_name(element.tag) == "itemref"
+		]
+		bodies = []
+		for path in spine:
+			root = lxml.etree.fromstring(archive.read(path))
+			body = next(
+				element for element in root.iter()
+				if xml_local_name(element.tag) == "body"
+			)
+			bodies.append(lxml.etree.tostring(body, encoding="unicode"))
+	html_text = "<html><body>" + "\n".join(bodies) + "</body></html>"
+	return html_text
+
+
+#============================================
+def extract_azw3_text(source_path: pathlib.Path) -> str:
+	"""Recover ordered reading XHTML with the installed Mobipocket decoder."""
+	huffdic_header(source_path)
+	_temporary_root, extracted_epub = mobi.extract(str(source_path))
+	text = epub_spine_html(pathlib.Path(extracted_epub))
+	if "\ufffd" in text:
+		raise ValueError("mobi EPUB recovery contains a replacement marker")
 	return text
 
 
@@ -219,6 +296,7 @@ class MarkdownRenderer(html.parser.HTMLParser):
 		super().__init__(convert_charrefs=True)
 		self.pieces: list[str] = []
 		self.heading_level: int | None = None
+		self.excluded_depth = 0
 
 	#============================================
 	def block_break(self) -> None:
@@ -230,6 +308,11 @@ class MarkdownRenderer(html.parser.HTMLParser):
 	#============================================
 	def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
 		"""Render source markup that carries block or inline text meaning."""
+		if tag in {"head", "script", "style"}:
+			self.excluded_depth += 1
+			return
+		if self.excluded_depth:
+			return
 		if tag in {"p", "div", "section", "article", "blockquote", "pre", "table", "tr"}:
 			self.block_break()
 		elif tag == "br":
@@ -257,6 +340,11 @@ class MarkdownRenderer(html.parser.HTMLParser):
 	#============================================
 	def handle_endtag(self, tag: str) -> None:
 		"""Close source markup that has a Markdown representation."""
+		if tag in {"head", "script", "style"}:
+			self.excluded_depth -= 1
+			return
+		if self.excluded_depth:
+			return
 		if tag in {"p", "div", "section", "article", "blockquote", "pre", "table", "tr", "li"}:
 			self.block_break()
 		elif tag in {"b", "strong"}:
@@ -270,6 +358,8 @@ class MarkdownRenderer(html.parser.HTMLParser):
 	#============================================
 	def handle_data(self, data: str) -> None:
 		"""Preserve source-visible text in the order received from the source."""
+		if self.excluded_depth:
+			return
 		self.pieces.append(data)
 
 
