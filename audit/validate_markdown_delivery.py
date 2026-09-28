@@ -20,7 +20,12 @@ STRUCTURED_SOURCE_PATTERN = re.compile(
 	r'^source:\s*["\']?[^"\'\n]+\.(?:docx|epub|htm|html|odt)["\']?\s*$',
 	re.IGNORECASE | re.MULTILINE,
 )
-IMAGE_PATTERN = re.compile(r"!\[[^]]*\]\([^)]*\)|<img\b|\[Start Picture-Text\]", re.IGNORECASE)
+# An even backslash run leaves the opening angle bracket unescaped.
+IMAGE_PATTERN = re.compile(
+	r"!\[[^]]*\]\([^)]*\)|(?<!\\)(?:\\\\)*<img\b|"
+	r"\[Start Picture-Text\]",
+	re.IGNORECASE,
+)
 ACTIVE_TAG_PATTERN = re.compile(
 	r"(?<!\\)</?(?:a|abbr|article|aside|b|blockquote|br|code|details|div|em|figure|font|"
 	r"h[1-6]|hr|i|img|li|math|ol|p|pre|section|span|strong|summary|svg|"

@@ -6,6 +6,12 @@ All notable changes to this project are documented in this file.
 
 ### Fixes and Maintenance
 
+- Ignore `<img>` text after an odd backslash run; reject raw tags after even runs and
+  retain detection of Markdown images and picture-text markers.
+- Keep valid currency entities in publication candidates while rejecting replacement
+  characters and entities.
+- Inspect EPUB XHTML with ordinary DOCTYPE declarations while keeping DTD loading and
+  entity resolution disabled and refusing unresolved entity references.
 - Store promotion and pending-lifecycle lock files in visible corpus conversion state.
 - Keep temporary publication snapshots visibly named.
 - Reject nonprinting control characters in Markdown delivery validation.

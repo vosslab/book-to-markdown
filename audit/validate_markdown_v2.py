@@ -36,7 +36,12 @@ except ImportError:
     sys.exit(2)
 
 CANONICAL_FILENAME_PATTERN = re.compile(r"^[A-Z0-9][A-Za-z0-9_ -]{0,88}[A-Za-z0-9]-[12][0-9]{3}\.md$")
-IMAGE_PATTERN = re.compile(r"!\[[^]]*\]\([^)]*\)|<img\b|\[Start Picture-Text\]", re.IGNORECASE)
+# An even backslash run leaves the opening angle bracket unescaped.
+IMAGE_PATTERN = re.compile(
+	r"!\[[^]]*\]\([^)]*\)|(?<!\\)(?:\\\\)*<img\b|"
+	r"\[Start Picture-Text\]",
+	re.IGNORECASE,
+)
 BARE_PAGE_PATTERN = re.compile(r"^\d{1,4}$")
 STRUCTURED_SOURCE_PATTERN = re.compile(r"^(?:structured|source)\s*:", re.MULTILINE | re.IGNORECASE)
 

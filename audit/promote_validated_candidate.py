@@ -126,7 +126,7 @@ def sha256(path: pathlib.Path) -> str:
 
 #============================================
 def require_clean_content(candidate: pathlib.Path) -> None:
-	"""Reject unresolved glyph and known encoding-degradation entities."""
+	"""Reject unresolved glyphs and replacement characters or entities."""
 	candidate_text = candidate.read_text(encoding="utf-8", errors="replace")
 	unresolved_markers = (
 		candidate_text.count("[unmapped-PDF-glyph-")
@@ -134,13 +134,13 @@ def require_clean_content(candidate: pathlib.Path) -> None:
 	)
 	if unresolved_markers:
 		raise ValueError("unresolved source glyphs")
-	degradation_entities = len(re.findall(
-		r"&#(?:x?FFFD|0*65533|x?00A2|x?00A3|x?20AC|x?163|x?162);|&(?:cent|pound|euro);",
+	replacement_markers = candidate_text.count("\uFFFD") + len(re.findall(
+		r"&#(?:x0*FFFD|0*65533);",
 		candidate_text,
 		flags=re.I,
 	))
-	if degradation_entities:
-		raise ValueError("disallowed entity classes")
+	if replacement_markers:
+		raise ValueError("replacement characters or entities")
 
 
 #============================================

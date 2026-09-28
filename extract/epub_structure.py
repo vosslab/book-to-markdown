@@ -73,12 +73,11 @@ def first_element(
 
 #============================================
 def parse_xml(entries: dict[str, bytes], path: str) -> lxml.etree._Element:
-	"""Parse one required XML resource without DTDs or external entities."""
+	"""Parse required XML while ignoring DTDs and refusing entity references."""
 	if path not in entries:
 		raise ValueError(f"EPUB is missing required entry: {path}")
 	xml_bytes = entries[path]
-	if re.search(br"<!DOCTYPE", xml_bytes, re.IGNORECASE):
-		raise ValueError(f"EPUB XML must not contain a DOCTYPE declaration: {path}")
+	# ASVS 1.5.1: accept XHTML declarations without loading or resolving their DTDs.
 	parser = lxml.etree.XMLParser(
 		resolve_entities=False,
 		no_network=True,
@@ -90,6 +89,8 @@ def parse_xml(entries: dict[str, bytes], path: str) -> lxml.etree._Element:
 		remove_pis=True,
 	)
 	root = lxml.etree.fromstring(xml_bytes, parser=parser)
+	if any(isinstance(element, lxml.etree._Entity) for element in root.iter()):
+		raise ValueError(f"EPUB XML DOCTYPE entity references are unsupported: {path}")
 	return root
 
 
