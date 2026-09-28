@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented in this file.
 
+## 2026-09-28
+
+### Fixes and Maintenance
+
+- Store promotion and pending-lifecycle lock files in visible corpus conversion state.
+- Keep temporary publication snapshots visibly named.
+- Reject nonprinting control characters in Markdown delivery validation.
+
+## 2026-09-27
+
+### Fixes and Maintenance
+
+- Kept source-verified Unicode in fenced and indented code blocks out of the prose-only ASCII delivery check.
+- Made the markdown-it delivery validator apply its parsed code-block exclusion before its prose ASCII check.
+- Allowed new-title admission to use an accepted, candidate- and source-bound independent review when word counts cannot represent expected cleanup.
+- Preserved valid Markdown comparison entities (`&lt;`, `&gt;`) during promotion while continuing to reject replacement and misdecoded currency entities.
+
 ## 2026-09-12
 
 ### Additions and New Features

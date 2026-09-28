@@ -126,7 +126,7 @@ def sha256(path: pathlib.Path) -> str:
 
 #============================================
 def require_clean_content(candidate: pathlib.Path) -> None:
-	"""Reject unresolved glyph and entity degradation before publication."""
+	"""Reject unresolved glyph and known encoding-degradation entities."""
 	candidate_text = candidate.read_text(encoding="utf-8", errors="replace")
 	unresolved_markers = (
 		candidate_text.count("[unmapped-PDF-glyph-")
@@ -134,13 +134,12 @@ def require_clean_content(candidate: pathlib.Path) -> None:
 	)
 	if unresolved_markers:
 		raise ValueError("unresolved source glyphs")
-	pointless_entities = len(re.findall(r"&lt;|&gt;", candidate_text, flags=re.I))
 	degradation_entities = len(re.findall(
 		r"&#(?:x?FFFD|0*65533|x?00A2|x?00A3|x?20AC|x?163|x?162);|&(?:cent|pound|euro);",
 		candidate_text,
 		flags=re.I,
 	))
-	if pointless_entities or degradation_entities:
+	if degradation_entities:
 		raise ValueError("disallowed entity classes")
 
 
@@ -169,6 +168,23 @@ def require_admission_gate(config: PromotionConfig) -> str:
 	elif basis == "complete_source_disposition":
 		if fidelity["unaccounted_words"] != 0:
 			raise ValueError("incomplete source disposition accounting")
+	elif basis == "independent_source_review":
+		source = admission["source_path"]
+		source_sha = admission["source_sha256"]
+		if sha256(pathlib.Path(source)) != source_sha:
+			raise ValueError("admission source hash mismatch")
+		review_path = pathlib.Path(fidelity["review_receipt_path"])
+		if not review_path.is_absolute():
+			review_path = config.candidate.parent / review_path
+		review = json.loads(review_path.read_text(encoding="utf-8"))
+		if review.get("decision") != "ACCEPT":
+			raise ValueError("independent source review is not accepted")
+		if review.get("candidate", {}).get("sha256") != candidate_sha:
+			raise ValueError("independent review candidate hash mismatch")
+		if review.get("source", {}).get("sha256") != source_sha:
+			raise ValueError("independent review source hash mismatch")
+		if not review.get("reviewer") or not review.get("scope_checked"):
+			raise ValueError("independent review receipt lacks reviewer or scope")
 	else:
 		raise ValueError("unsupported source-fidelity basis")
 	lifecycle = admission.get("lifecycle")
@@ -295,13 +311,31 @@ def subject_superseded_path(config: PromotionConfig) -> pathlib.Path:
 
 
 #============================================
+def visible_lock_directory(path: pathlib.Path) -> pathlib.Path:
+	"""Return the corpus conversion_state lock directory for one workflow path."""
+	for parent in path.parents:
+		if parent.name == "conversion_state":
+			return parent / "locks"
+		if parent.name in {
+			"SORTED_SUBJECTS_MD",
+			"AUDIT_REPAIR",
+			"COMPLETED_SOURCE",
+			"DUPLICATE_SOURCE",
+			"SKIPPED_SOURCE",
+		}:
+			return parent.parent / "conversion_state" / "locks"
+	return path.parent / "locks"
+
+
+#============================================
 @contextlib.contextmanager
 def promotion_lock(destination: pathlib.Path) -> abc.Iterator[None]:
 	"""Hold the shared canonical-destination lock across final publication."""
-	destination.parent.mkdir(parents=True, exist_ok=True)
+	lock_directory = visible_lock_directory(destination)
+	lock_directory.mkdir(parents=True, exist_ok=True)
 	canonical_title = str(destination.resolve(strict=False)).encode("utf-8")
 	lock_name = hashlib.sha256(canonical_title).hexdigest()
-	lock_path = destination.parent / f".{lock_name}.promotion.lock"
+	lock_path = lock_directory / f"promotion-{lock_name}.lock"
 	with lock_path.open("a+", encoding="ascii") as lock_file:
 		fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
 		try:
@@ -314,10 +348,11 @@ def promotion_lock(destination: pathlib.Path) -> abc.Iterator[None]:
 @contextlib.contextmanager
 def pending_lifecycle_reservation(pending: pathlib.Path) -> abc.Iterator[None]:
 	"""Serialize every title-specific PENDING creation and final lifecycle transition."""
-	pending.parent.mkdir(parents=True, exist_ok=True)
+	lock_directory = visible_lock_directory(pending)
+	lock_directory.mkdir(parents=True, exist_ok=True)
 	pending_title = str(pending.resolve(strict=False)).encode("utf-8")
 	lock_name = hashlib.sha256(pending_title).hexdigest()
-	lock_path = pending.parent / f".{lock_name}.pending.lifecycle.lock"
+	lock_path = lock_directory / f"lifecycle-{lock_name}.lock"
 	with lock_path.open("a+", encoding="ascii") as lock_file:
 		fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
 		try:
@@ -390,9 +425,10 @@ def create_admitted_snapshot(
 	source_descriptor: int | None = None
 	snapshot_descriptor: int | None = None
 	snapshot: pathlib.Path | None = None
+	snapshot_prefix = candidate.name.lstrip(".") or "candidate"
 	try:
 		snapshot_descriptor, snapshot_name = tempfile.mkstemp(
-			prefix=f".{candidate.name}.", suffix=".promotion.snapshot", dir=destination_parent,
+			prefix=f"{snapshot_prefix}.", suffix=".promotion.snapshot", dir=destination_parent,
 		)
 		snapshot = pathlib.Path(snapshot_name)
 		source_descriptor = os.open(candidate, os.O_RDONLY)

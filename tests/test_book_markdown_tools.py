@@ -11,6 +11,7 @@ import pytest
 MARKDOWN_QUALITY = importlib.import_module("markdown_quality")
 COMPARE = importlib.import_module("compare_markdown_candidates")
 VALIDATE = importlib.import_module("validate_markdown_delivery")
+VALIDATE_V2 = importlib.import_module("validate_markdown_v2")
 WRAP = importlib.import_module("wrap_malformed_tables")
 PDF_CLEANUP = importlib.import_module("pdf_extract.cleanup")
 EPUB_STRUCTURE = importlib.import_module("epub_structure")
@@ -148,6 +149,19 @@ def test_delivery_validator_rejects_page_and_image_debris() -> None:
 	issues = VALIDATE.validate_text(path, "# Example Book\n\n42\n\n![figure](figure.png)\n")
 	codes = {item.code for item in issues}
 	assert "bare-page-number" in codes and "image-markup" in codes
+
+
+def test_v2_delivery_validator_rejects_nonprinting_controls_but_allows_whitespace() -> None:
+	"""Source-encoding controls fail validation without rejecting normal Markdown whitespace."""
+	path = pathlib.Path("Example_Book-2026.md")
+	text = "# Example Book\r\n\r\nUse\x02ful text.\r\n"
+	issues = VALIDATE_V2.validate_text(path, text)
+	control_issues = [item for item in issues if item.code == "control-character"]
+	assert len(control_issues) == 1
+	assert control_issues[0].line == 3
+	assert "U+0002" in control_issues[0].message
+	clean_text = "# Example Book\r\n\r\nUse\tful text.\r\n"
+	assert not VALIDATE_V2.validate_text(path, clean_text)
 
 
 def test_delivery_validator_ignores_markup_examples_inside_inline_code() -> None:

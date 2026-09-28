@@ -103,12 +103,6 @@ def validate_text(path: pathlib.Path, text: str) -> list[ValidationIssue]:
 		issues.append(issue("h1-count", path, 0, f"expected exactly one H1; found {len(h1s)}"))
 	for index, line in enumerate(lines):
 		line_number = index + 1
-		if any(ord(character) > 127 for character in line):
-			issues.append(issue(
-				"nonascii-content", path, line_number,
-				"replace raw non-ASCII text with ASCII or entities",
-			))
-			break
 		if index in fenced:
 			continue
 		if line.startswith(("    ", "\t")):
@@ -116,6 +110,12 @@ def validate_text(path: pathlib.Path, text: str) -> list[ValidationIssue]:
 		quote_content = re.sub(r"^(?:> ?)+", "", line)
 		if quote_content.startswith(("    ", "\t")):
 			continue
+		if any(ord(character) > 127 for character in line):
+			issues.append(issue(
+				"nonascii-content", path, line_number,
+				"replace raw non-ASCII text with ASCII or entities",
+			))
+			break
 		visible_line = markdown_quality.without_inline_code(line)
 		if not structured_source and BARE_PAGE_PATTERN.fullmatch(line):
 			issues.append(issue("bare-page-number", path, line_number, "remove the page-only line"))

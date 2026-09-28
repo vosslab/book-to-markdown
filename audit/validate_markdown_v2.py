@@ -14,6 +14,7 @@ classified by its TOKEN's block semantics, so:
   - heading tokens                 -> exact H1 counting (level 1 only)
   - everything else                -> visible content: bare-page-number,
                                       image-markup, active-html checks
+  - all text                        -> nonprinting control-character check
 
 v1's hole: any 4-space-indented line was skipped as "code", so EPUB tables
 left as indented raw HTML (<table>/<tr>/<td>...) passed validation. markdown-it
@@ -26,6 +27,7 @@ import json
 import pathlib
 import re
 import sys
+import unicodedata
 
 try:
     from markdown_it import MarkdownIt
@@ -146,6 +148,27 @@ def validate_filename(path: pathlib.Path) -> list[ValidationIssue]:
 
 
 #============================================
+def validate_control_characters(path: pathlib.Path, text: str) -> list[ValidationIssue]:
+	"""Reject nonprinting C0/C1 controls while allowing Markdown whitespace."""
+	# ASVS V2.2.1: enforce text-output expectations at the trusted validation layer.
+	controls_by_line: dict[int, set[int]] = {}
+	line_number = 1
+	for character in text:
+		if character == "\n":
+			line_number += 1
+		elif character not in "\r\t" and unicodedata.category(character) == "Cc":
+			controls_by_line.setdefault(line_number, set()).add(ord(character))
+	issues = []
+	for line_number, codepoints in controls_by_line.items():
+		codes = ", ".join(f"U+{codepoint:04X}" for codepoint in sorted(codepoints))
+		issues.append(ValidationIssue(
+			"control-character", path, line_number,
+			f"repair nonprinting control characters: {codes}",
+		))
+	return issues
+
+
+#============================================
 def frontmatter_policy(text: str) -> dict:
     """Read policy opt-outs from the YAML frontmatter.
 
@@ -203,7 +226,7 @@ def classify_tags(tags: set[str]) -> tuple[set[str], set[str]]:
 
 #============================================
 def validate_text(path: pathlib.Path, text: str) -> list[ValidationIssue]:
-    issues = []
+    issues = validate_control_characters(path, text)
     lines = text.splitlines()
     structured_source = STRUCTURED_SOURCE_PATTERN.search(text) is not None
     subject = subject_of(path)
@@ -258,6 +281,8 @@ def validate_text(path: pathlib.Path, text: str) -> list[ValidationIssue]:
 
     # non-ASCII check (first offending line only, same as v1)
     for index, line in enumerate(lines):
+        if index in code_lines:
+            continue
         if any(ord(c) > 127 for c in line):
             issues.append(ValidationIssue(
                 "nonascii-content", path, index + 1,

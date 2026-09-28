@@ -18,9 +18,11 @@ New-title admission also requires the literal `admission_status: "ACCEPTED"`; mi
 admission states are refusals, not inferred permission to publish.
 
 The PENDING creator and both promotion lifecycle branches share one title-specific flock
-reservation. Writers perform exclusive PENDING creation and canonical absence checking under that
-reservation; promoters retain it through their final lifecycle transition. Each owner compensates
-only its own inode or canonical hard link, so an unreserved late conflict removes no unrelated file.
+reservation. Visible lock files live centrally in `<corpus-root>/conversion_state/locks/` and use
+ordinary names: `promotion-<sha>.lock` and `lifecycle-<sha>.lock`. Writers perform exclusive
+PENDING creation and canonical absence checking under that reservation; promoters retain it
+through their final lifecycle transition. Each owner compensates only its own inode or canonical
+hard link, so an unreserved late conflict removes no unrelated file.
 
 Canonical hash readback and filesystem synchronization are the promotion outcome. Both promotion
 branches retain their staged candidate after that outcome. The promoter cannot safely reclaim a
