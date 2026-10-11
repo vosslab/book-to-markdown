@@ -22,7 +22,14 @@ export PYTHONDONTWRITEBYTECODE=1
 # Scripts live in extract/, cleanup/, and audit/ and import the sibling
 # repo-root modules markdown_quality and pdf_extract. Must come after sourcing
 # ~/.bashrc, which clears PYTHONPATH.
-# Assumes the repo is inside a Git work tree (git rev-parse).
-REPO_ROOT="$(git rev-parse --show-toplevel)"
+# Resolve the repository from this sourced file, even outside a Git work tree.
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+if [ -f "$SCRIPT_DIR/markdown_quality.py" ]; then
+	REPO_ROOT="$SCRIPT_DIR"
+else
+	REPO_ROOT="$SCRIPT_DIR/book-to-markdown"
+fi
+REPO_ROOT="$(cd -- "$REPO_ROOT" && pwd -P)"
 export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+unset SCRIPT_DIR
 unset REPO_ROOT

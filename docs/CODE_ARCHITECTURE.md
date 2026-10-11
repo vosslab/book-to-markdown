@@ -23,13 +23,17 @@ DjVu, and text into one page-free Markdown file per title. Scripts are grouped i
 2. Clean and repair Markdown with `cleanup/clean_markdown.py`.
 3. Validate the staged candidate with the delivery and v2 validators.
 4. Bind validation evidence and an explicit lifecycle in candidate-adjacent `admission_gate.json`.
-5. Use `audit/promote_validated_candidate.py` for one of two lifecycle branches:
-   `SUPERSEDES_PENDING` link-publishes canonical and a subject-scoped predecessor backup, while
-   `NEW_TITLE_NO_PREDECESSOR` requires an explicit accepted admission status and uses a shared
-   title-specific PENDING reservation, canonical-destination lock, and verified same-filesystem
-   snapshot for atomic no-clobber publication without predecessor artifacts.
-6. Canonical hash readback and synchronization establish promotion; both branches retain the staged
-   candidate rather than unlinking a mutable path after commit.
+5. Use `audit/promote_validated_candidate.py` to publish. For repairs to an existing canonical
+   book, `DIRECT_CANONICAL_REPLACEMENT` is the primary lifecycle: admission and an independent
+   review receipt bind the destination and predecessor path/hash; the promoter rechecks predecessor
+   identity and hash under the visible title lock, creates and verifies an exclusive predecessor
+   backup, then uses `os.replace` and canonical readback. The canonical path stays present, with no
+   PENDING gap. The legacy `SUPERSEDES_PENDING` five-positional lifecycle remains for a real
+   PENDING predecessor. `NEW_TITLE_NO_PREDECESSOR` remains for a new title and requires an explicit
+   accepted admission status, the expected-absent PENDING path, a destination lock, and verified
+   snapshot for atomic no-clobber publication.
+6. Canonical hash readback and synchronization establish promotion; the promoter retains the staged
+   candidate rather than unlinking its mutable path after commit.
 7. A separate receipt owner writes the external receipt and sidecar, then an independent strict
    closure step verifies lifecycle authority and identity before any staged-candidate reclamation.
 

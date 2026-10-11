@@ -1,7 +1,19 @@
 import os
 import sys
 
+import pytest
+
 import file_utils
+
+
+#============================================
+def pytest_addoption(parser: pytest.Parser) -> None:
+	"""Keep repository hygiene verification read-only unless explicitly enabled."""
+	parser.addoption(
+		"--fix-repo-files", dest="no_ascii_fix", action="store_false", default=True,
+		help="Allow hygiene tests to fix repository source files in place",
+	)
+
 
 # Insert the repo root onto sys.path so top-level modules import from any test
 # file without installing the package first. file_utils.get_repo_root() uses

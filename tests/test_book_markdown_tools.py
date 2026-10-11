@@ -16,6 +16,52 @@ WRAP = importlib.import_module("wrap_malformed_tables")
 PDF_CLEANUP = importlib.import_module("pdf_extract.cleanup")
 EPUB_STRUCTURE = importlib.import_module("epub_structure")
 ARCHIVE_SOURCES = importlib.import_module("archive_processed_sources")
+AZW3 = importlib.import_module("extract.azw3_to_markdown")
+
+
+def test_azw3_html_renderer_preserves_code_and_table_structure() -> None:
+	"""Code whitespace and source table cells survive the public renderer API."""
+	html_text = (
+		"<p>Ordinary <em>paragraph</em> text.</p>"
+		"<pre><code>for i in range(2):\n    print(i)\n\n"
+		"<span>        # nested span</span><br>value = ```literal```"
+		"</code></pre>"
+		"<table><thead><tr><td>FEATURE</td><td>MINIMUM</td></tr></thead>"
+		"<tbody><tr><td>alcohol</td><td>11.03</td></tr>"
+		"<tr><td>a|b</td><td>12</td></tr></tbody></table>"
+		"<p>After the table.</p>"
+	)
+	markdown = AZW3.html_to_markdown(html_text, "Example")
+
+	assert "# Example\n\nOrdinary _paragraph_ text.\n\n" in markdown
+	code = "for i in range(2):\n    print(i)\n\n        # nested span\n"
+	code += "value = ```literal```\n"
+	assert code in markdown
+	assert markdown.count("````\n") == 2
+	assert "| FEATURE | MINIMUM |\n| --- | --- |\n" in markdown
+	assert "| alcohol | 11.03 |\n| a\\|b | 12 |" in markdown
+	assert "\n\nAfter the table.\n" in markdown
+	assert markdown.isascii()
+
+
+def test_azw3_renderer_preserves_table_breaks_and_fenced_headings() -> None:
+	"""Table breaks remain readable and numbered-heading joining skips code fences."""
+	html_text = (
+		"<table><tr><td>first<br>second</td><td>"
+		"Pros: No server-side round-trips involved. The data remains on the iOS device."
+		"<br>Cons: You are restricted to models supported by Core ML runtime."
+		"</td></tr></table>"
+		"<pre>example\n\n1\n\n## Keep this code line</pre>"
+		"<p>1</p><h2>Joined prose heading</h2>"
+	)
+	markdown = AZW3.html_to_markdown(html_text, "Example")
+
+	assert "| first second | " in markdown
+	assert "device. Cons: You are restricted" in markdown
+	assert "## Keep this code line" in markdown
+	assert "## 1 Keep this code line" not in markdown
+	assert "example\n\n1\n\n## Keep this code line\n" in markdown
+	assert "## 1 Joined prose heading" in markdown
 
 
 def write_flat_epub(epub_path: pathlib.Path) -> None:
@@ -141,6 +187,34 @@ def test_delivery_validator_accepts_canonical_page_free_markdown(tmp_path: pathl
 	book_path.write_text("# Example Computational Geometry\n\nReadable content.\n", encoding="ascii")
 	report = VALIDATE.validate_delivery(book_path)
 	assert report["status"] == "PASS"
+	assert not VALIDATE_V2.validate_filename(book_path)
+
+
+def test_public_validators_accept_undated_and_reject_malformed_suffixes(tmp_path: pathlib.Path) -> None:
+	"""Both delivery validators accept explicit unknown years and reject other suffixes."""
+	for filename in ("Example_Computational_Geometry-UNDATED.md", "Example_Computational_Geometry-2026.md"):
+		book_path = tmp_path / filename
+		book_path.write_text("# Example Computational Geometry\n\nReadable content.\n", encoding="ascii")
+		assert VALIDATE.validate_delivery(book_path)["status"] == "PASS"
+		assert not VALIDATE_V2.validate_filename(book_path)
+
+	for filename in ("Example_Computational_Geometry-unknown.md", "Example_Computational_Geometry-undated.md"):
+		book_path = tmp_path / filename
+		assert "filename-shape" in {item.code for item in VALIDATE.canonical_filename_issues(book_path)}
+		assert "filename-shape" in {item.code for item in VALIDATE_V2.validate_filename(book_path)}
+
+	source_named = tmp_path / "Example_from_EPUB-UNDATED.md"
+	assert "source-suffix" in {item.code for item in VALIDATE.canonical_filename_issues(source_named)}
+	assert "source-suffix" in {item.code for item in VALIDATE_V2.validate_filename(source_named)}
+
+
+def test_undated_titles_are_not_grouped_as_same_edition() -> None:
+	"""Unknown publication years do not establish that same-title books share an edition."""
+	paths = [
+		(pathlib.Path("Example_Book-UNDATED.md"), "# Example Book\n"),
+		(pathlib.Path("Example_Book_Second_Edition-UNDATED.md"), "# Example Book\n"),
+	]
+	assert not VALIDATE.duplicate_title_issues(paths)
 
 
 def test_delivery_validator_rejects_page_and_image_debris() -> None:
@@ -162,6 +236,126 @@ def test_v2_delivery_validator_rejects_nonprinting_controls_but_allows_whitespac
 	assert "U+0002" in control_issues[0].message
 	clean_text = "# Example Book\r\n\r\nUse\tful text.\r\n"
 	assert not VALIDATE_V2.validate_text(path, clean_text)
+
+
+def test_v2_validator_accepts_scientific_fences_and_fenced_prose() -> None:
+	"""Fence prevalence and payload type belong to source-aware review, not generic validation."""
+	path = pathlib.Path("biology/Example_Biology-2026.md")
+	text = (
+		"# Example Biology\n\n"
+		"```text\n"
+		"ASSRATGIPDRFSGSGSGTDFTLTISRLEPEDFAVYYCQQYGSSPYTFGQGTKLEIK\n"
+		"ASSRATGIPDRFSGSGSGTDFTLTITRLEPEDFAVYYCQQYGGSPYTFGQGTKLEIK\n"
+		"```\n\n"
+		"```\n"
+		"alpha = S/L\n"
+		"beta = T/L\n"
+		"integral from 0 to L of c * x dx = c * L^2/2\n"
+		"```\n\n"
+		"```python\n"
+		"def measure(sequence):\n"
+		"    return len(sequence)\n"
+		"```\n\n"
+		"```text\n"
+		"An extracted passage may contain prose while its source fidelity is reviewed separately.\n"
+		"```\n"
+	)
+	issues = VALIDATE_V2.validate_text(path, text)
+	assert not issues
+
+	# Unicode line and paragraph separators are payload characters to CommonMark,
+	# even though Python's str.splitlines() treats them as line boundaries.
+	unicode_separators = (
+		"# Example Biology\n\n"
+		"```text\n"
+		"left\u2028middle\u2029right\n"
+		"```\n"
+	)
+	assert not VALIDATE_V2.validate_text(path, unicode_separators)
+
+
+def test_v2_validator_rejects_unclosed_fence_and_concrete_residue() -> None:
+	"""Structural damage and explicit extraction residue remain generic failures."""
+	path = pathlib.Path("biology/Example_Biology-2026.md")
+	unclosed = VALIDATE_V2.validate_text(path, "# Example Biology\n\n```text\npassage\n")
+	assert "unclosed-code-fence" in {issue.code for issue in unclosed}
+	residue = VALIDATE_V2.validate_text(
+		path, "# Example Biology\n\n<table>\n<tr><td>leftover</td></tr>\n</table>\n"
+	)
+	assert "indented-html-table" in {issue.code for issue in residue}
+
+
+def test_v2_validator_uses_commonmark_nested_fence_boundaries() -> None:
+	"""List indentation is interpreted by CommonMark, while invalid closers fail."""
+	path = pathlib.Path("biology/Example_Biology-2026.md")
+	nested = (
+		"# Example Biology\n\n"
+		"- outer\n"
+		"  - inner\n\n"
+		"      ~~~~python\n"
+		"      print('ok')\n"
+		"      ~~~~~~\n"
+	)
+	assert not VALIDATE_V2.validate_text(path, nested)
+
+	for closer in ("      ````", "      ~~", "      ~~~~extra"):
+		broken = (
+			"# Example Biology\n\n- item\n\n    ~~~~text\n    payload\n"
+			+ closer + "\n"
+		)
+		issues = VALIDATE_V2.validate_text(path, broken)
+		assert "unclosed-code-fence" in {issue.code for issue in issues}
+
+	unterminated = "# Example Biology\n\n- item\n\n    ```text\n    payload\n"
+	assert "unclosed-code-fence" in {
+		issue.code for issue in VALIDATE_V2.validate_text(path, unterminated)
+	}
+
+	# A shorter marker-like payload line is allowed when the mapped final line
+	# is a valid, longer closer.
+	top_level = (
+		"# Example Biology\n\n"
+		"````text\n"
+		"    ```\n"
+		"````\n"
+	)
+	assert not VALIDATE_V2.validate_text(path, top_level)
+
+	# The same valid longer closer and marker-like payload work in containers.
+	list_payload = "# Example Biology\n\n- item\n\n  ````text\n      ```\n  `````\n"
+	assert not VALIDATE_V2.validate_text(path, list_payload)
+	blockquote_payload = "# Example Biology\n\n> ````text\n>     ```\n> `````\n"
+	assert not VALIDATE_V2.validate_text(path, blockquote_payload)
+
+	# Marker-like payload at EOF remains unclosed in a blockquote container.
+	blockquote_unclosed = "> ````text\n>     ```\n"
+	assert "unclosed-code-fence" in {
+		issue.code for issue in VALIDATE_V2.validate_text(path, blockquote_unclosed)
+	}
+
+	# Four spaces make a marker line indented code at top level, not a closer.
+	indented_marker_unclosed = "```text\n    ```\n"
+	assert "unclosed-code-fence" in {
+		issue.code for issue in VALIDATE_V2.validate_text(path, indented_marker_unclosed)
+	}
+	for marker in ("``", "~~~"):
+		marker_unclosed = "```text\npayload\n" + marker + "\n"
+		assert "unclosed-code-fence" in {
+			issue.code for issue in VALIDATE_V2.validate_text(path, marker_unclosed)
+		}
+
+	# Four-space code is a code block, but it is not a fenced block to validate.
+	indented = "# Example Biology\n\n    ordinary code\n"
+	assert not VALIDATE_V2.validate_text(path, indented)
+
+	# These independent delivery checks still apply around fenced content.
+	residue = "# Example Biology\n\n![figure](figure.png)\n\n<table>\n<tr><td>x</td></tr>\n</table>\n"
+	issues = VALIDATE_V2.validate_text(path, residue)
+	codes = {issue.code for issue in issues}
+	assert "image-markup" in codes
+	assert "indented-html-table" in codes
+	controls = VALIDATE_V2.validate_text(path, "# Example Biology\n\nBad\x03text.\n")
+	assert "control-character" in {issue.code for issue in controls}
 
 
 def test_delivery_validator_ignores_markup_examples_inside_inline_code() -> None:

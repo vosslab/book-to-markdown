@@ -219,9 +219,11 @@ def score_pages(results: list[PageResult]) -> dict[str, int | float | bool | str
 
 #============================================
 def canonical_template(line: str) -> str:
-	"""Mask digits in one candidate page-furniture line."""
+	"""Mask digits except in standalone numbered chapter, part, and appendix labels."""
 	plain_line = re.sub(r"^#{1,6}\s+", "", line.strip())
 	plain_line = plain_line.strip("*_` ")
+	if re.fullmatch(r"(?:CHAPTER|PART|APPENDIX)\s+\d+(?:\.\d+)*", plain_line, re.IGNORECASE):
+		return plain_line
 	# Some PDFs place a recurring chapter label before the first body words on
 	# one physical line. Keep that short prefix auditable and removable without
 	# discarding the prose after it.
@@ -400,7 +402,11 @@ def full_template_pattern(template: str) -> re.Pattern[str]:
 def remove_running_heads(results: list[PageResult], removals: list[Removal], defaults: dict[str, int | float]) -> list[RunningHeadDecision]:
 	"""Delete measured running heads and promote only corroborated real headings."""
 	decisions = running_head_decisions(results, defaults)
-	patterns = [(decision, template_pattern(decision.template)) for decision in decisions if decision.disposition == "delete"]
+	patterns = [
+		(decision, full_template_pattern(decision.template))
+		for decision in decisions
+		if decision.disposition == "delete"
+	]
 	promotion_patterns = [
 		(decision, full_template_pattern(decision.template))
 		for decision in decisions
@@ -418,13 +424,15 @@ def remove_running_heads(results: list[PageResult], removals: list[Removal], def
 			line_index = line_number - 1
 			if line_index in edge_indexes and line_index not in code_indexes and not is_markdown_pipe_table_row(remaining_line):
 				for decision, pattern in patterns:
-					match = pattern.search(remaining_line)
+					match = pattern.fullmatch(remaining_line)
 					if match is None:
 						continue
-					removed_text = remaining_line[match.start():match.end()].strip()
-					remaining_line = (remaining_line[:match.start()] + remaining_line[match.end():]).strip(" *_`")
-					removals.append(Removal("running_head", result.page_number + 1, line_number, removed_text,
-						f"recurrent edge template: {decision.template}"))
+					removed_text = match.group().strip()
+					remaining_line = ""
+					removals.append(Removal(
+						"running_head", result.page_number + 1, line_number, removed_text,
+						f"recurrent edge template: {decision.template}"
+					))
 			if line_index not in edge_indexes and line_index not in code_indexes and not is_markdown_pipe_table_row(remaining_line):
 				for decision, pattern in promotion_patterns:
 					if re.match(r"^\s*#{1,6}\s+", remaining_line) or pattern.fullmatch(remaining_line) is None:

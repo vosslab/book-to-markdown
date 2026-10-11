@@ -2,6 +2,80 @@
 
 All notable changes to this project are documented in this file.
 
+## 2026-10-11
+
+### Fixes and Maintenance
+
+- Preserve distinct standalone numbered chapter, part, and appendix labels while measuring PDF running heads.
+- Measure unresolved line-break hyphens across unprotected blank-line gaps while preserving the
+  existing cleaned text and reporting the original prefix line.
+- Synchronized shared style guides, tests, and repository support files from the starter template.
+## 2026-10-10
+
+### Fixes and Maintenance
+
+- Preserve the ring-above scientific symbol through ASCII cleanup instead of dropping it during
+  Unicode compatibility normalization.
+- Preserve AZW3 table-cell line breaks as readable separators and leave fenced code unchanged during
+  numbered-heading joining.
+- Preserve AZW3 preformatted code indentation and explicit table row/cell boundaries in Markdown.
+- Disable pytest cache generation so tool tests do not create hidden cache files.
+- Preserve explicitly flagged PDF superscript spans as ASCII `^{...}` text during raw extraction.
+- Preserve blank-line boundaries between distinct PDF text blocks so cleanup reflows only within
+  each block.
+- Recover PDF word boundaries represented only by clear glyph-position gaps while preserving
+  touching glyphs across style changes.
+
+### Behavior or Interface Changes
+
+- Accept `-UNDATED.md` for identified books whose publication year cannot be verified.
+- Require a source-bound independent review for every candidate promotion; word counts and source-disposition totals remain diagnostic evidence, not numeric admission gates.
+
+## 2026-10-09
+
+### Fixes and Maintenance
+
+- Keep Mobipocket unpacking output in a reader-owned temporary directory and remove it after text
+  parsing, including when EPUB parsing fails.
+
+## 2026-10-07
+
+### Fixes and Maintenance
+
+- Bind independent-review source and candidate path labels as well as their hashes before direct
+  canonical replacement, and cover recovery handling for a changed completed predecessor backup.
+- Report bounded unresolved line-break hyphenation in cleanup output, and map protected spans
+  through their final included character when deciding which following prose can be measured.
+- Separate cleanup report construction and terminal rendering from the transformation pipeline.
+- Remove the unsupported text-rich-page warning from OCR while retaining page validation and
+  guaranteed PDF closure on extraction failures.
+- Preserve the five-page Genetic Engineering positioned-text prototype in visible corpus
+  experiment evidence rather than the reusable tool package.
+
+## 2026-10-06
+
+### Fixes and Maintenance
+
+- Report bounded examples and counts for unresolved PDF line-break hyphenation before Markdown reflow.
+- Map protected spans through their final included character, so following prose is eligible for guarded joins and unresolved-hyphen reporting immediately after a quote or code block.
+- Remove measured PDF running heads only when the complete edge line matches, preserving longer chapter titles and captions.
+
+## 2026-10-05
+
+### Fixes and Maintenance
+
+- Added direct canonical replacement with source-bound admission and predecessor-hash checks,
+  a verified no-clobber predecessor backup, and atomic `os.replace` publication with recovery
+  reporting.
+- Corrected `audit/validate_markdown_v2.py` indentation to match repository style.
+- Removed the unreliable code-fence content/density classifier. The generic validator checks
+  fence structure and concrete residue; source-aware review determines whether fenced content
+  matches its source.
+- Validate fenced code boundaries using markdown-it's CommonMark list nesting and token markup.
+- Judge fence closure from markdown-it's mapped opener, content, and recognized closer boundaries so indented marker-like payload lines cannot masquerade as closers.
+- Count fenced payload lines with CommonMark CR/LF boundaries so Unicode line separators remain ordinary code content.
+- Made `extract/azw3_to_markdown.py` executable for direct invocation.
+
 ## 2026-09-28
 
 ### Fixes and Maintenance

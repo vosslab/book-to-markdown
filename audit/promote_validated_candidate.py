@@ -26,6 +26,7 @@ from datetime import datetime
 
 NEW_TITLE_NO_PREDECESSOR = "NEW_TITLE_NO_PREDECESSOR"
 SUPERSEDES_PENDING = "SUPERSEDES_PENDING"
+DIRECT_CANONICAL_REPLACEMENT = "DIRECT_CANONICAL_REPLACEMENT"
 ValidatorRunner = abc.Callable[[pathlib.Path, pathlib.Path], int]
 
 
@@ -39,6 +40,7 @@ class PromotionConfig:
 	expected_absent_pending: pathlib.Path
 	predecessor: pathlib.Path | None
 	superseded_root: pathlib.Path | None
+	expected_predecessor_sha256: str | None = None
 
 	@classmethod
 	def new_title(
@@ -81,6 +83,27 @@ class PromotionConfig:
 		)
 		return config
 
+	@classmethod
+	def replace_canonical(
+			cls,
+			candidate: pathlib.Path,
+			destination: pathlib.Path,
+			superseded_root: pathlib.Path,
+			validator: pathlib.Path,
+			expected_predecessor_sha256: str,
+			) -> "PromotionConfig":
+		"""Build a direct, hash-bound canonical replacement configuration."""
+		return cls(
+			DIRECT_CANONICAL_REPLACEMENT,
+			candidate,
+			destination,
+			validator,
+			destination,
+			destination,
+			superseded_root,
+			expected_predecessor_sha256,
+		)
+
 
 @dataclasses.dataclass(frozen=True)
 class FileVersion:
@@ -108,6 +131,17 @@ def parse_config(arguments: list[str]) -> PromotionConfig:
 		candidate, destination, pending, validator = map(pathlib.Path, arguments[1:])
 		config = PromotionConfig.new_title(candidate, destination, pending, validator)
 		return config
+	if arguments and arguments[0] == "--replace-canonical":
+		if len(arguments) != 6:
+			raise ValueError(
+				"usage: --replace-canonical CANDIDATE DESTINATION SUPERSEDED_ROOT "
+				"EXPECTED_PREDECESSOR_SHA256 VALIDATOR"
+			)
+		candidate, destination, superseded_root = map(pathlib.Path, arguments[1:4])
+		expected_sha, validator = arguments[4:]
+		return PromotionConfig.replace_canonical(
+			candidate, destination, superseded_root, pathlib.Path(validator), expected_sha,
+		)
 	if len(arguments) != 5:
 		raise ValueError("usage: CANDIDATE DESTINATION PENDING SUPERSEDED_ROOT VALIDATOR")
 	candidate, destination, pending, superseded_root, validator = map(pathlib.Path, arguments)
@@ -156,22 +190,11 @@ def require_admission_gate(config: PromotionConfig) -> str:
 	if fidelity["status"] != "PASS" or table_figure["status"] != "PASS":
 		raise ValueError("source fidelity or table/figure gate not passed")
 	basis = fidelity["basis"]
-	if basis == "direct_source_word_count":
-		source_words = fidelity["source_words"]
-		candidate_words = fidelity["candidate_words"]
-		if not isinstance(source_words, int) or source_words <= 0:
-			raise ValueError("invalid direct-source word accounting")
-		if not isinstance(candidate_words, int) or candidate_words <= 0:
-			raise ValueError("invalid direct-source word accounting")
-		if abs(candidate_words - source_words) / source_words > 0.01:
-			raise ValueError("direct-source word fidelity exceeds 1%")
-	elif basis == "complete_source_disposition":
-		if fidelity["unaccounted_words"] != 0:
-			raise ValueError("incomplete source disposition accounting")
-	elif basis == "independent_source_review":
+	if basis == "independent_source_review":
 		source = admission["source_path"]
 		source_sha = admission["source_sha256"]
-		if sha256(pathlib.Path(source)) != source_sha:
+		source_path = pathlib.Path(source)
+		if sha256(source_path) != source_sha:
 			raise ValueError("admission source hash mismatch")
 		review_path = pathlib.Path(fidelity["review_receipt_path"])
 		if not review_path.is_absolute():
@@ -179,14 +202,33 @@ def require_admission_gate(config: PromotionConfig) -> str:
 		review = json.loads(review_path.read_text(encoding="utf-8"))
 		if review.get("decision") != "ACCEPT":
 			raise ValueError("independent source review is not accepted")
-		if review.get("candidate", {}).get("sha256") != candidate_sha:
+		review_candidate = review.get("candidate", {})
+		review_source = review.get("source", {})
+		if review_candidate.get("sha256") != candidate_sha:
 			raise ValueError("independent review candidate hash mismatch")
-		if review.get("source", {}).get("sha256") != source_sha:
+		if review_source.get("sha256") != source_sha:
 			raise ValueError("independent review source hash mismatch")
+		if config.mode == DIRECT_CANONICAL_REPLACEMENT:
+			candidate_label_value = review_candidate.get("path")
+			if not isinstance(candidate_label_value, str) or not candidate_label_value:
+				raise ValueError("independent review candidate path is missing")
+			candidate_label = pathlib.Path(candidate_label_value)
+			if not candidate_label.is_absolute():
+				raise ValueError("independent review candidate path must be absolute")
+			if candidate_label.resolve() != config.candidate.resolve():
+				raise ValueError("independent review candidate path mismatch")
+			source_label_value = review_source.get("path")
+			if not isinstance(source_label_value, str) or not source_label_value:
+				raise ValueError("independent review source path is missing")
+			source_label = pathlib.Path(source_label_value)
+			if not source_label.is_absolute():
+				raise ValueError("independent review source path must be absolute")
+			if source_label.resolve() != source_path.resolve():
+				raise ValueError("independent review source path mismatch")
 		if not review.get("reviewer") or not review.get("scope_checked"):
 			raise ValueError("independent review receipt lacks reviewer or scope")
 	else:
-		raise ValueError("unsupported source-fidelity basis")
+		raise ValueError("promotion requires independent source review")
 	lifecycle = admission.get("lifecycle")
 	if config.mode == NEW_TITLE_NO_PREDECESSOR:
 		if not isinstance(lifecycle, dict):
@@ -200,7 +242,28 @@ def require_admission_gate(config: PromotionConfig) -> str:
 		if lifecycle["destination"] != str(config.destination):
 			raise ValueError("admission destination does not match invocation")
 	elif lifecycle is not None and lifecycle["mode"] != SUPERSEDES_PENDING:
-		raise ValueError("legacy replacement conflicts with admission lifecycle")
+		if config.mode != DIRECT_CANONICAL_REPLACEMENT or lifecycle["mode"] != DIRECT_CANONICAL_REPLACEMENT:
+			raise ValueError("replacement conflicts with admission lifecycle")
+	if config.mode == DIRECT_CANONICAL_REPLACEMENT:
+		if not isinstance(lifecycle, dict) or lifecycle.get("mode") != DIRECT_CANONICAL_REPLACEMENT:
+			raise ValueError("direct replacement requires a lifecycle declaration")
+		if lifecycle.get("destination") != str(config.destination):
+			raise ValueError("admission destination does not match invocation")
+		if lifecycle.get("expected_predecessor_sha256") != config.expected_predecessor_sha256:
+			raise ValueError("admission predecessor hash does not match invocation")
+		if fidelity["basis"] != "independent_source_review":
+			raise ValueError("direct replacement requires independent source review")
+		review_path = pathlib.Path(fidelity["review_receipt_path"])
+		if not review_path.is_absolute():
+			review_path = config.candidate.parent / review_path
+		review = json.loads(review_path.read_text(encoding="utf-8"))
+		predecessor = review.get("predecessor", {})
+		if review.get("destination") != str(config.destination):
+			raise ValueError("independent review destination mismatch")
+		if predecessor.get("sha256") != config.expected_predecessor_sha256:
+			raise ValueError("independent review predecessor hash mismatch")
+		if predecessor.get("path") != str(config.destination):
+			raise ValueError("independent review predecessor path mismatch")
 	return candidate_sha
 
 
@@ -510,6 +573,172 @@ def require_replacement_publication_preconditions(
 
 
 #============================================
+def copy_predecessor_backup(
+		predecessor: pathlib.Path, backup: pathlib.Path, expected_sha: str,
+		expected_version: FileVersion) -> None:
+	"""Create and durably verify a no-clobber copy of the exact canonical predecessor."""
+	backup.parent.mkdir(parents=True, exist_ok=True)
+	flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+	backup_descriptor = os.open(backup, flags, 0o644)
+	source_descriptor: int | None = None
+	owned_version: FileVersion | None = None
+	try:
+		try:
+			# Keep descriptor identity capture inside cleanup scope: even this first
+			# metadata read can fail after O_EXCL has created the backup pathname.
+			owned_version = file_version(os.fstat(backup_descriptor))
+			try:
+				source_descriptor = os.open(predecessor, os.O_RDONLY)
+				if file_version(os.fstat(source_descriptor)) != expected_version:
+					raise ValueError("canonical predecessor inode changed before backup")
+				digest = hashlib.sha256()
+				while True:
+					block = os.read(source_descriptor, 1024 * 1024)
+					if not block:
+						break
+					digest.update(block)
+					write_all(backup_descriptor, block)
+				if digest.hexdigest() != expected_sha:
+					raise ValueError("canonical predecessor hash changed before backup")
+				os.fsync(backup_descriptor)
+			except (OSError, ValueError):
+				owned_version = file_version(os.fstat(backup_descriptor))
+				raise
+			owned_version = file_version(os.fstat(backup_descriptor))
+		finally:
+			if source_descriptor is not None:
+				os.close(source_descriptor)
+			os.close(backup_descriptor)
+		if sha256(backup) != expected_sha:
+			raise OSError("superseded backup readback hash mismatch")
+		fsync_directory(backup.parent)
+	except (OSError, ValueError) as error:
+		if owned_version is None:
+			raise OSError(
+				f"replacement backup recovery required; ownership could not be verified; "
+				f"inspect {backup}; canonical remains at {predecessor}"
+			) from error
+		try:
+			if file_version(os.lstat(backup)) == owned_version:
+				os.unlink(backup)
+				fsync_directory(backup.parent)
+		except FileNotFoundError:
+			pass
+		except OSError as cleanup_error:
+			raise OSError(
+				f"replacement backup recovery required; inspect {backup}; "
+				f"canonical remains at {predecessor}"
+			) from cleanup_error
+		else:
+			try:
+				file_version(os.lstat(backup))
+			except FileNotFoundError:
+				pass
+			else:
+				raise OSError(
+					f"replacement backup recovery required; changed backup left at {backup}; "
+					f"canonical remains at {predecessor}"
+				) from error
+		raise
+
+
+#============================================
+def require_verified_predecessor_backup(
+		backup: pathlib.Path, expected_sha: str, expected_version: FileVersion,
+		) -> None:
+	"""Require the retained backup to keep its copied identity and exact bytes."""
+	if file_version(os.lstat(backup)) != expected_version:
+		raise ValueError(f"replacement backup changed; inspect {backup}")
+	if sha256(backup) != expected_sha:
+		raise ValueError(f"replacement backup hash changed; inspect {backup}")
+	if file_version(os.lstat(backup)) != expected_version:
+		raise ValueError(f"replacement backup changed during verification; inspect {backup}")
+
+
+#============================================
+def publish_direct_replacement(
+		config: PromotionConfig, admitted_sha: str, predecessor_version: FileVersion,
+		) -> tuple[pathlib.Path, dict[str, str] | None]:
+	"""Back up and atomically replace the exact admitted canonical predecessor."""
+	if config.expected_predecessor_sha256 is None:
+		raise ValueError("direct replacement requires an expected predecessor hash")
+	backup = subject_superseded_path(config)
+	require_same_filesystem(config.candidate, config.destination.parent)
+	with promotion_lock(config.destination):
+		current = file_version(os.lstat(config.destination))
+		if current != predecessor_version:
+			raise ValueError("canonical predecessor inode changed after admission")
+		if sha256(config.destination) != config.expected_predecessor_sha256:
+			raise ValueError("canonical predecessor hash changed after admission")
+		require_bound_admission(config, admitted_sha)
+		publication_snapshot = create_admitted_snapshot(
+			config.candidate, config.destination.parent, admitted_sha,
+		)
+		published = False
+		backup_version: FileVersion | None = None
+		checking_backup = False
+		try:
+			if file_version(os.lstat(config.destination)) != predecessor_version:
+				raise ValueError("canonical predecessor inode changed before replacement")
+			if sha256(config.destination) != config.expected_predecessor_sha256:
+				raise ValueError("canonical predecessor hash changed before replacement")
+			if backup.exists():
+				raise FileExistsError(f"superseded destination already exists: {backup}")
+			copy_predecessor_backup(
+				config.destination, backup, config.expected_predecessor_sha256,
+				predecessor_version,
+			)
+			backup_version = file_version(os.lstat(backup))
+			if file_version(os.lstat(config.destination)) != predecessor_version:
+				raise ValueError("canonical predecessor inode changed before atomic replacement")
+			if sha256(config.destination) != config.expected_predecessor_sha256:
+				raise ValueError("canonical predecessor hash changed before atomic replacement")
+			checking_backup = True
+			require_verified_predecessor_backup(
+				backup, config.expected_predecessor_sha256, backup_version,
+			)
+			checking_backup = False
+			os.replace(publication_snapshot.snapshot, config.destination)
+			published = True
+			fsync_directory(config.destination.parent)
+			verify_canonical_commit(config.destination, admitted_sha)
+			checking_backup = True
+			require_verified_predecessor_backup(
+				backup, config.expected_predecessor_sha256, backup_version,
+			)
+			checking_backup = False
+		except (OSError, ValueError) as error:
+			remove_snapshot(publication_snapshot.snapshot)
+			if published:
+				recovery = cleanup_recovery_evidence(
+					config.destination, config.candidate,
+					"replacement_backup_integrity" if checking_backup else "replacement_readback",
+					error,
+				)
+				if checking_backup:
+					recovery["backup"] = str(backup)
+				return backup, recovery
+			if backup.exists() and backup_version is None:
+				raise error
+			if backup.exists():
+				try:
+					require_verified_predecessor_backup(
+						backup, config.expected_predecessor_sha256, backup_version,
+					)
+				except (OSError, ValueError) as backup_error:
+					raise OSError(
+						f"replacement blocked; canonical remains at {config.destination}; "
+						f"inspect backup conflict at {backup}"
+					) from backup_error
+				raise OSError(
+					f"replacement failed; canonical remains at {config.destination}; "
+					f"verified predecessor backup is {backup}"
+				) from error
+			raise
+		return backup, None
+
+
+#============================================
 def verify_canonical_commit(destination: pathlib.Path, admitted_sha: str) -> None:
 	"""Read back and durably acknowledge the irreversible canonical publication."""
 	fsync_file(destination)
@@ -633,9 +862,16 @@ def promote(
 	"""Validate and atomically publish one configured candidate lifecycle."""
 	if not config.candidate.is_file():
 		raise ValueError("candidate artifact must exist")
+	predecessor_version: FileVersion | None = None
 	if config.mode == SUPERSEDES_PENDING:
 		if config.predecessor is None or not config.predecessor.is_file():
 			raise ValueError("pending predecessor artifact must exist")
+	elif config.mode == DIRECT_CANONICAL_REPLACEMENT:
+		if not config.destination.is_file() or config.expected_predecessor_sha256 is None:
+			raise ValueError("direct replacement requires an existing canonical predecessor")
+		predecessor_version = file_version(os.lstat(config.destination))
+		if sha256(config.destination) != config.expected_predecessor_sha256:
+			raise ValueError("canonical predecessor hash does not match admission")
 	elif config.mode != NEW_TITLE_NO_PREDECESSOR:
 		raise ValueError(f"unsupported lifecycle mode: {config.mode}")
 	require_clean_content(config.candidate)
@@ -644,6 +880,10 @@ def promote(
 	admitted_sha = require_admission_gate(config)
 	if config.mode == NEW_TITLE_NO_PREDECESSOR:
 		superseded, cleanup = publish_new_title(config, admitted_sha)
+	elif config.mode == DIRECT_CANONICAL_REPLACEMENT:
+		if predecessor_version is None:
+			raise RuntimeError("predecessor version was not captured")
+		superseded, cleanup = publish_direct_replacement(config, admitted_sha, predecessor_version)
 	else:
 		superseded, cleanup = publish_replacement(config, admitted_sha)
 	result: dict[str, object] = {
@@ -654,6 +894,15 @@ def promote(
 		"lifecycle_mode": config.mode,
 		"expected_absent_pending": str(config.expected_absent_pending),
 		"cleanup": cleanup,
+		"predecessor_sha256": config.expected_predecessor_sha256,
+		"replacement_status": (
+			"RECOVERY_REQUIRED" if cleanup is not None and
+			config.mode == DIRECT_CANONICAL_REPLACEMENT else
+			("REPLACED" if config.mode == DIRECT_CANONICAL_REPLACEMENT else None)
+		),
+		"superseded_sha256": (
+			sha256(superseded) if superseded is not None and superseded.is_file() else None
+		),
 	}
 	return result
 

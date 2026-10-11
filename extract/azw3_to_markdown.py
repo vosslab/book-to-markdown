@@ -8,11 +8,13 @@ import pathlib
 import posixpath
 import re
 import struct
+import tempfile
 import zipfile
 
 # PIP3 modules
 import lxml.etree
 import mobi
+import mobi.kindleunpack
 
 
 HUFF_COMPRESSION = 0x4448
@@ -263,8 +265,10 @@ def epub_spine_html(epub_path: pathlib.Path) -> str:
 def extract_azw3_text(source_path: pathlib.Path) -> str:
 	"""Recover ordered reading XHTML with the installed Mobipocket decoder."""
 	huffdic_header(source_path)
-	_temporary_root, extracted_epub = mobi.extract(str(source_path))
-	text = epub_spine_html(pathlib.Path(extracted_epub))
+	with tempfile.TemporaryDirectory(prefix="azw3_mobi_") as temporary_root:
+		mobi.kindleunpack.unpackBook(str(source_path), temporary_root, epubver="A")
+		extracted_epub = pathlib.Path(temporary_root) / "mobi8" / (source_path.stem + ".epub")
+		text = epub_spine_html(extracted_epub)
 	if "\ufffd" in text:
 		raise ValueError("mobi EPUB recovery contains a replacement marker")
 	return text
@@ -293,10 +297,19 @@ class MarkdownRenderer(html.parser.HTMLParser):
 
 	def __init__(self) -> None:
 		"""Initialize an entity-aware source-order HTML renderer."""
+		# ASVS 1.1.1: Decode source HTML entities once before rendering its text.
 		super().__init__(convert_charrefs=True)
 		self.pieces: list[str] = []
 		self.heading_level: int | None = None
 		self.excluded_depth = 0
+		self.pre_depth = 0
+		self.code_pieces: list[str] = []
+		self.table_depth = 0
+		self.table_rows: list[tuple[list[str], bool]] = []
+		self.table_row: list[str] | None = None
+		self.table_row_is_header = False
+		self.table_cell_start: int | None = None
+		self.table_head_depth = 0
 
 	#============================================
 	def block_break(self) -> None:
@@ -313,7 +326,31 @@ class MarkdownRenderer(html.parser.HTMLParser):
 			return
 		if self.excluded_depth:
 			return
-		if tag in {"p", "div", "section", "article", "blockquote", "pre", "table", "tr"}:
+		if tag == "pre":
+			self.pre_depth += 1
+			return
+		if self.pre_depth:
+			if tag == "br":
+				self.code_pieces.append("\n")
+			return
+		if tag == "table":
+			self.block_break()
+			self.table_depth += 1
+			self.table_rows = []
+			return
+		if self.table_depth:
+			if tag == "thead":
+				self.table_head_depth += 1
+			elif tag == "tr":
+				self.table_row = []
+				self.table_row_is_header = self.table_head_depth > 0
+			elif tag in {"td", "th"} and self.table_row is not None:
+				self.table_cell_start = len(self.pieces)
+				self.table_row_is_header = self.table_row_is_header or tag == "th"
+			elif tag == "br" and self.table_cell_start is not None:
+				self.pieces.append(" ")
+			return
+		if tag in {"p", "div", "section", "article", "blockquote", "tr"}:
 			self.block_break()
 		elif tag == "br":
 			self.pieces.append("\n")
@@ -345,7 +382,43 @@ class MarkdownRenderer(html.parser.HTMLParser):
 			return
 		if self.excluded_depth:
 			return
-		if tag in {"p", "div", "section", "article", "blockquote", "pre", "table", "tr", "li"}:
+		if tag == "pre" and self.pre_depth:
+			self.pre_depth -= 1
+			if self.pre_depth == 0:
+				code = "".join(self.code_pieces).replace("\r\n", "\n").replace("\r", "\n")
+				longest_backticks = max((len(run) for run in re.findall(r"`+", code)), default=0)
+				fence = "`" * max(3, longest_backticks + 1)
+				if code and not code.endswith("\n"):
+					code += "\n"
+				self.pieces.append(f"\n\n{fence}\n{code}{fence}\n\n")
+				self.code_pieces = []
+			return
+		if self.pre_depth:
+			return
+		if self.table_depth:
+			if tag in {"td", "th"} and self.table_cell_start is not None:
+				cell = "".join(self.pieces[self.table_cell_start:])
+				self.pieces[self.table_cell_start:] = []
+				if self.table_row is not None:
+					cell = re.sub(r"\s+", " ", cell).strip().replace("|", r"\|")
+					self.table_row.append(cell)
+				self.table_cell_start = None
+			elif tag == "tr" and self.table_row is not None:
+				self.table_rows.append((self.table_row, self.table_row_is_header))
+				self.table_row = None
+			elif tag == "thead" and self.table_head_depth:
+				self.table_head_depth -= 1
+			elif tag == "table":
+				self.table_depth -= 1
+				if self.table_depth == 0:
+					for row_index, (cells, is_header) in enumerate(self.table_rows):
+						self.pieces.append("| " + " | ".join(cells) + " |\n")
+						if row_index == 0 and is_header:
+							self.pieces.append("| " + " | ".join("---" for _ in cells) + " |\n")
+					self.block_break()
+					self.table_rows = []
+			return
+		if tag in {"p", "div", "section", "article", "blockquote", "tr", "li"}:
 			self.block_break()
 		elif tag in {"b", "strong"}:
 			self.pieces.append("**")
@@ -360,15 +433,38 @@ class MarkdownRenderer(html.parser.HTMLParser):
 		"""Preserve source-visible text in the order received from the source."""
 		if self.excluded_depth:
 			return
+		if self.pre_depth:
+			self.code_pieces.append(data)
+			return
 		self.pieces.append(data)
 
 
 #============================================
 def join_numbered_headings(markdown: str) -> str:
-	"""Join a source-visible chapter number with its immediately following heading."""
+	"""Join numbered headings without changing content inside fenced code."""
 	pattern = re.compile(r"\n\n([1-9][0-9]{0,2})\n\n## (.+?)(?=\n)")
-	joined = pattern.sub(r"\n\n## \1 \2", markdown)
-	return joined
+	joined_parts: list[str] = []
+	prose_parts: list[str] = []
+	fence_length = 0
+	for line in markdown.splitlines(keepends=True):
+		fence_match = re.match(r"^[ \t]*(`{3,})", line)
+		if fence_match:
+			marker_length = len(fence_match.group(1))
+			if not fence_length:
+				joined_parts.append(pattern.sub(r"\n\n## \1 \2", "".join(prose_parts)))
+				prose_parts = []
+				fence_length = marker_length
+			elif marker_length >= fence_length:
+				fence_length = 0
+				prose_parts.append(line)
+				continue
+			joined_parts.append(line)
+		elif fence_length:
+			joined_parts.append(line)
+		else:
+			prose_parts.append(line)
+	joined_parts.append(pattern.sub(r"\n\n## \1 \2", "".join(prose_parts)))
+	return "".join(joined_parts)
 
 
 #============================================
@@ -378,10 +474,31 @@ def html_to_markdown(text: str, title: str) -> str:
 	renderer.feed(text)
 	renderer.close()
 	markdown = "# " + title + "\n\n" + "".join(renderer.pieces)
-	markdown = re.sub(r"[ 	]+\n", "\n", markdown)
-	markdown = re.sub(r"\n[ 	]+", "\n", markdown)
-	markdown = re.sub(r"\n{3,}", "\n\n", markdown)
+	cleaned_lines: list[str] = []
+	fence_length = 0
+	previous_blank = False
+	for line in markdown.splitlines(keepends=True):
+		fence_match = re.match(r"^[ \t]*(`{3,})", line)
+		if fence_match:
+			marker_length = len(fence_match.group(1))
+			if not fence_length:
+				fence_length = marker_length
+			elif marker_length >= fence_length:
+				fence_length = 0
+			cleaned_lines.append(line)
+			previous_blank = False
+		elif fence_length:
+			cleaned_lines.append(line)
+		else:
+			line = re.sub(r"[ \t]+\n$", "\n", line)
+			line = re.sub(r"^[ \t]+", "", line)
+			if line == "\n" and previous_blank:
+				continue
+			cleaned_lines.append(line)
+			previous_blank = line == "\n"
+	markdown = "".join(cleaned_lines)
 	markdown = join_numbered_headings(markdown)
+	# ASVS 1.1.2: Encode non-ASCII only when serializing the final Markdown text.
 	markdown = markdown.encode("ascii", "xmlcharrefreplace").decode("ascii")
 	markdown = markdown.strip() + "\n"
 	return markdown

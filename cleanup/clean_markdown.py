@@ -17,11 +17,14 @@ import re
 import unicodedata
 from collections.abc import Callable
 
+import cleanup.reporting
 import markdown_quality
 
 
 DEFAULT_DEBRIS_MIN_LINES = 5
 DEFAULT_DEBRIS_CAPTION_WINDOW = 15
+DEHYPHENATION_EXAMPLE_LIMIT = 5
+DEHYPHENATION_EXAMPLE_PART_LENGTH = 40
 PASS_NAMES = (
 	"images",
 	"html",
@@ -49,7 +52,7 @@ NONASCII_CHARACTER_MAP: dict[str, str] = {
 	"\u2026": "...", "\u2022": "*", "\u00b7": "*", "\u00d7": "*", "\u2217": "*",
 	"\u2212": "-", "\u00b1": "+/-", "\u2264": "<=", "\u2265": ">=", "\u2260": "!=",
 	"\u2190": "<-", "\u2192": "->", "\u2194": "<->", "\u21d2": "=>", "\u21d4": "<=>",
-	"\u00b0": " deg", "\u00f7": "/", "\u221e": "&infin;", "\u2208": "&isin;",
+	"\u00b0": " deg", "\u02da": "&#x02DA;", "\u00f7": "/", "\u221e": "&infin;", "\u2208": "&isin;",
 	"\u2209": "&notin;", "\u2205": "&empty;", "\u2200": "&forall;", "\u2203": "&exist;",
 	"\u2211": "&sum;", "\u220f": "&prod;", "\u222b": "&int;", "\u221a": "&radic;",
 	"\u2261": "&equiv;", "\u2248": "&asymp;", "\u2245": "&cong;", "\u2227": "&and;",
@@ -608,18 +611,26 @@ def protected_line(line: str, in_fence: bool) -> bool:
 
 
 #============================================
+def protected_line_indices(text: str) -> set[int]:
+	"""Map protected character spans to lines they actually contain."""
+	protected_lines: set[int] = set()
+	for start, end in protected_spans(text):
+		if end <= start:
+			continue
+		start_line = text.count("\n", 0, start)
+		end_line = text.count("\n", 0, end - 1)
+		protected_lines.update(range(start_line, end_line + 1))
+	return protected_lines
+
+
+#============================================
 def guarded_dehyphenate(text: str, removals: list[Removal]) -> str:
 	"""Join a line-break hyphen only when the joined word is corroborated elsewhere."""
 	lines = text.splitlines()
 	# A real occurrence elsewhere is evidence that an extraction split occurred;
 	# without it, retain a possibly meaningful technical compound.
 	word_forms = {word.lower() for word in re.findall(r"\b[A-Za-z]{4,}\b", text)}
-	protected_offsets = protected_spans(text)
-	protected_lines: set[int] = set()
-	for start, end in protected_offsets:
-		start_line = text.count("\n", 0, start)
-		end_line = text.count("\n", 0, end)
-		protected_lines.update(range(start_line, end_line + 1))
+	protected_lines = protected_line_indices(text)
 	output: list[str] = []
 	in_fence = False
 	index = 0
@@ -647,6 +658,46 @@ def guarded_dehyphenate(text: str, removals: list[Removal]) -> str:
 		output.append(line)
 		index += 1
 	return "\n".join(output)
+
+
+#============================================
+def measure_unresolved_dehyphenation(text: str) -> tuple[int, list[dict[str, object]]]:
+	"""Count remaining unprotected line-break hyphens and retain bounded examples."""
+	lines = text.splitlines()
+	protected_lines = protected_line_indices(text)
+	count = 0
+	examples: list[dict[str, object]] = []
+	in_fence = False
+	for index, line in enumerate(lines):
+		fence_line = line.strip().startswith("```")
+		if fence_line:
+			in_fence = not in_fence
+		if fence_line:
+			continue
+		next_index = index + 1
+		while next_index < len(lines) and not lines[next_index].strip():
+			if next_index in protected_lines or protected_line(lines[next_index], in_fence):
+				break
+			next_index += 1
+		if next_index >= len(lines) or not lines[next_index].strip():
+			continue
+		next_line = lines[next_index]
+		can_measure = index not in protected_lines and next_index not in protected_lines
+		can_measure = can_measure and not protected_line(line, in_fence) and not protected_line(next_line, in_fence)
+		match = re.search(r"([A-Za-z]{3,})-\s*$", line)
+		next_match = re.match(r"^[a-z]{2,}\b", next_line.lstrip())
+		if not can_measure or match is None or next_match is None:
+			continue
+		count += 1
+		if len(examples) < DEHYPHENATION_EXAMPLE_LIMIT:
+			# ASVS 1.1.1, 2.2.1: inspect already-normalized input with a narrow
+			# allowlisted grammar and fixed example bounds before report serialization.
+			examples.append({
+				"line": index + 1,
+				"prefix": match.group(1)[:DEHYPHENATION_EXAMPLE_PART_LENGTH],
+				"continuation": next_match.group(0)[:DEHYPHENATION_EXAMPLE_PART_LENGTH],
+			})
+	return count, examples
 
 
 #============================================
@@ -839,6 +890,9 @@ def clean_text(text: str, skipped: set[str], min_lines: int, caption_window: int
 		text = clean_html(text, removals)
 	if "dehyphenate" not in skipped:
 		text = guarded_dehyphenate(text, removals)
+	unresolved_count, unresolved_examples = measure_unresolved_dehyphenation(text)
+	metrics["unresolved_dehyphenation_candidates"] = unresolved_count
+	metrics["unresolved_dehyphenation_examples"] = unresolved_examples
 	if "figure-debris" not in skipped:
 		text, debris = remove_figure_debris(text, removals, min_lines, caption_window)
 		metrics.update(debris)
@@ -915,47 +969,6 @@ def write_sidecar(path: pathlib.Path, removals: list[Removal]) -> None:
 
 
 #============================================
-def build_report(input_path: pathlib.Path, output_path: pathlib.Path, metrics: dict[str, object], skipped: set[str], args: argparse.Namespace, sampled: bool) -> dict[str, object]:
-	"""Build the same compact data for JSON diffs and terminal review."""
-	report: dict[str, object] = {
-		"input": str(input_path), "output": str(output_path), "sampled": sampled,
-		"measure_only": args.measure, "skipped_passes": sorted(skipped),
-		"enabled_passes": [name for name in PASS_NAMES if name not in skipped],
-		"debris_min_lines": args.debris_min_lines,
-		"debris_caption_window": args.debris_caption_window,
-		"metrics": metrics,
-	}
-	return report
-
-
-#============================================
-def print_report(report: dict[str, object]) -> None:
-	"""Print a small human report; examples remain in the adjacent sidecar."""
-	metrics = report["metrics"]
-	print(f"Input: {report['input']}")
-	print(f"Output: {report['output']}")
-	print(f"Measure only: {'yes' if report['measure_only'] else 'no'}")
-	print(f"Enabled passes: {', '.join(report['enabled_passes'])}")
-	print(f"Lines/chars: {metrics['before_lines']}/{metrics['before_characters']} -> {metrics['after_lines']}/{metrics['after_characters']}")
-	print(f"Source lines: {metrics['input_lines']} total; short-line ratio: {metrics['short_line_ratio']:.1%}")
-	print(f"Tags: {', '.join(metrics['tag_names']) if metrics['tag_names'] else 'none'}")
-	print(f"Figure debris: {metrics['figure_debris_candidates']} candidates, {metrics['figure_debris_removed_lines']} lines removed, {metrics['figure_debris_ambiguous_runs']} retained")
-	print(f"Non-ASCII characters measured: {metrics['non_ascii_characters']}")
-	for finding in metrics["symbol_findings"][:5]:
-		print(f"Symbol {finding['codepoint']}: {finding['count']}")
-	print(f"Audit events: {metrics.get('removal_events', 0)}")
-	removal_counts = metrics["removal_counts"]
-	if removal_counts:
-		count_text = ", ".join(f"{name}={count}" for name, count in removal_counts.items())
-		print(f"Audit counts: {count_text}")
-		if metrics["tag_operations"]:
-			print(f"Tag operations: {metrics['tag_operations']}")
-		for pass_name, examples in metrics["removal_examples"].items():
-			first_example = examples[0]
-			print(f"Sample {pass_name} lines {first_example['line_start']}-{first_example['line_end']}: {first_example['preview']}")
-
-
-#============================================
 def main() -> None:
 	"""Clean an extracted book, or measure a bounded sample without changing it."""
 	args = parse_args()
@@ -971,14 +984,16 @@ def main() -> None:
 		text += "\n"
 	skipped = set(args.skip)
 	cleaned, removals, metrics = clean_text(text, skipped, args.debris_min_lines, args.debris_caption_window)
-	report = build_report(input_path, output_path, metrics, skipped, args, args.lines is not None)
+	report = cleanup.reporting.build_report(
+		input_path, output_path, metrics, skipped, args, args.lines is not None, PASS_NAMES,
+	)
 	json_path = pathlib.Path(args.json_report) if args.json_report else output_path.with_suffix(output_path.suffix + ".report.json")
 	if not args.measure or args.json_report:
 		json_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="ascii")
 	if not args.measure:
 		output_path.write_text(cleaned, encoding="ascii")
 		write_sidecar(output_path.with_suffix(output_path.suffix + ".removed.md"), removals)
-	print_report(report)
+	cleanup.reporting.print_report(report)
 	if not args.measure or args.json_report:
 		print(f"JSON report: {json_path}")
 	else:

@@ -13,7 +13,7 @@ import markdown_quality
 MAX_FILENAME_LENGTH = 90
 TERMINAL_ISSUE_LIMIT = 50
 CANONICAL_FILENAME_PATTERN = re.compile(
-	r"^(?P<title>[A-Z0-9][A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)*)-(?P<year>\d{4})\.md$"
+	r"^(?P<title>[A-Z0-9][A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)*)-(?P<year>\d{4}|UNDATED)\.md$"
 )
 BARE_PAGE_PATTERN = re.compile(r"^\d+\s*$")
 STRUCTURED_SOURCE_PATTERN = re.compile(
@@ -67,9 +67,9 @@ def canonical_filename_issues(path: pathlib.Path) -> list[ValidationIssue]:
 	if match is None:
 		issues.append(issue(
 			"filename-shape", path, 0,
-			"use metadata title words joined by underscores plus -YYYY.md",
+			"use metadata title words joined by underscores plus -YYYY.md or -UNDATED.md",
 		))
-	if re.search(r"(?:^|_)(?:from_)?(?:pdf|epub)(?:_|-\d{4}\.md$)", filename, re.IGNORECASE):
+	if re.search(r"(?:^|_)(?:from_)?(?:pdf|epub)(?:_|-(?:\d{4}|UNDATED)\.md$)", filename, re.IGNORECASE):
 		issues.append(issue("source-suffix", path, 0, "remove source-specific PDF or EPUB suffixes"))
 	return issues
 
@@ -154,7 +154,7 @@ def duplicate_title_issues(
 	for path, text in paths_and_text:
 		h1s = extract_h1s(text)
 		filename_match = CANONICAL_FILENAME_PATTERN.fullmatch(path.name)
-		if len(h1s) != 1 or filename_match is None:
+		if len(h1s) != 1 or filename_match is None or filename_match.group("year") == "UNDATED":
 			continue
 		key = normalized_title(h1s[0][1]), filename_match.group("year")
 		grouped.setdefault(key, []).append(path)

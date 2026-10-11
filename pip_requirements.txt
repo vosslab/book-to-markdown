@@ -3,7 +3,7 @@ PyMuPDF         # PDF text-layer extraction (import fitz) and OCR bridge
 mobi            # Mobipocket/AZW3 extraction (azw3_to_markdown.py)
 lxml            # EPUB/HTML structure parsing (epub_structure.py)
 PyYAML          # metadata / frontmatter blocks
-markdown-it-py  # block-aware Markdown validation (validate_markdown_v2.py)
+markdown-it-py[linkify]  # block-aware Markdown validation and GFM link detection
 
 # Optional MathML-to-LaTeX backends (mathml_to_latex.py imports them lazily):
 # mathml-to-latex

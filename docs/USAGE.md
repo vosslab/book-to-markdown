@@ -3,6 +3,10 @@
 Run the toolchain from the repository root after sourcing `source_me.sh`. Scripts are grouped
 into `extract/`, `cleanup/`, and `audit/`.
 
+Run tool tests with `source source_me.sh && pytest tests/`. Hygiene tests are read-only by default;
+pass `--fix-repo-files` only when you intend their ASCII and whitespace fixers to edit repository
+files in place.
+
 ## Quick start
 
 - Convert a scanned or degraded PDF through the qualified OCR path:
@@ -11,22 +15,60 @@ into `extract/`, `cleanup/`, and `audit/`.
 - Convert a PDF with a text layer:
   - `python3 extract/pdf_raw_text_extraction_to_markdown.py book.pdf -o /tmp/book.raw.md`
   - `python3 cleanup/clean_markdown.py -i /tmp/book.raw.md -o /tmp/book.clean.md`
+- Convert supported AZW3 books; preformatted code keeps its indentation and literal heading-like
+  lines, and source tables keep their row, cell, and line-break boundaries:
+  - `python3 extract/azw3_to_markdown.py book.azw3 -o /tmp/book.raw.md`
+- Raw PDF extraction preserves spans that PyMuPDF explicitly flags as superscript using ASCII
+  `^{...}` notation. This includes raised citation references; it does not infer general
+  mathematical formatting or identify subscripts and fractions.
+- ASCII cleanup preserves the ring-above symbol as `&#x02DA;` before Unicode compatibility
+  normalization, so a superscript Angstrom unit does not become an empty exponent.
+- Raw PDF extraction separates distinct text blocks with blank lines while retaining single
+  newlines inside a block, allowing cleanup to join wrapped prose without merging adjacent blocks.
 - Validate the result:
   - `python3 audit/validate_markdown_v2.py /path/to/delivery-directory`
 
+Canonical filenames use metadata title words joined by underscores and a
+verified publication year (`-YYYY.md`) when available. If bounded source
+identity checks establish the title and author but no publication year can be
+verified, use `-UNDATED.md`; do not infer a year from a scan or source filename.
+An undated filename does not establish a specific edition or complete content.
+
 ## Promotion
 
-`audit/promote_validated_candidate.py` is an executable launcher that owns canonical publication. The
-candidate-adjacent `admission_gate.json` must bind the candidate SHA-256, passing source-fidelity
-and table/figure gates, and the declared lifecycle. The promoter runs the supplied validator and
-`audit/validate_markdown_v2.py` before publication.
+`audit/promote_validated_candidate.py` is an executable launcher that owns canonical publication.
+Run it from the tool repository after sourcing its Python environment:
 
-- Preserve a real predecessor with the unchanged five-positional command:
+```bash
+cd /Users/vosslab/nsh/book-to-markdown
+source source_me.sh && python3 audit/promote_validated_candidate.py \
+  --replace-canonical CANDIDATE DESTINATION SUPERSEDED_ROOT \
+  EXPECTED_PREDECESSOR_SHA256 \
+  /Volumes/Ex2GB/books/book-corpus-conversion-skill/scripts/validate_corpus_book.py
+```
+
+Use `DIRECT_CANONICAL_REPLACEMENT` for an existing canonical book that needs
+repair. The candidate-adjacent `admission_gate.json` binds the candidate hash,
+destination path, and expected predecessor hash. Its independent-review
+receipt binds the destination and predecessor path/hash as well as the
+candidate and source path/hash; both nested file paths must be absolute and
+resolve to the admitted files. It also records an accepted decision, reviewer,
+and checked scope. The promoter runs the supplied validator and
+`audit/validate_markdown_v2.py` before publication, then rechecks predecessor
+identity and hash under a visible title lock. It creates and verifies a
+no-clobber `O_EXCL` backup, atomically replaces the canonical file with
+`os.replace`, and reads back both canonical and backup hashes. The canonical
+path remains present throughout; this mode does not unlink it or create a
+PENDING gap.
+Locks are visible files in the corpus root's `conversion_state/locks/`;
+never create hidden lock files or unlink a lock while promotion may be running.
+
+- Preserve a real PENDING predecessor with the compatible legacy five-positional command:
   ```bash
   ./audit/promote_validated_candidate.py \
     CANDIDATE DESTINATION PENDING SUPERSEDED_ROOT VALIDATOR
   ```
-- Publish a verified new title without a predecessor only with the explicit command:
+- Publish a verified new title without a predecessor with the explicit command:
   ```bash
   ./audit/promote_validated_candidate.py --new-title \
     CANDIDATE DESTINATION EXPECTED_ABSENT_PENDING VALIDATOR

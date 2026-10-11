@@ -1,11 +1,9 @@
 """OCR text extraction for the PDF to Markdown pipeline."""
 
 import pathlib
-
 import fitz
 
 import pdf_extract.cleanup
-
 
 #============================================
 def extract_ocr_page(page: fitz.Page) -> str:
@@ -39,13 +37,22 @@ def extract_ocr_text(input_path: pathlib.Path, pages: list[int] | None) -> list[
 		list[pdf_extract.cleanup.PageResult]: One OCR page result per selected page.
 	"""
 	document = fitz.open(input_path)
-	page_numbers = pdf_extract.cleanup.get_page_numbers(document, pages)
-	results: list[pdf_extract.cleanup.PageResult] = []
-	for page_number in page_numbers:
-		page = document[page_number]
-		embedded_words = len(page.get_text("words"))
-		text = extract_ocr_page(page)
-		ocr_words = pdf_extract.cleanup.count_words(text)
-		results.append(pdf_extract.cleanup.PageResult(page_number, text, "ocr", embedded_words, ocr_words))
-	document.close()
+	try:
+		# Validate page indexes before accessing selected pages.
+		page_numbers = pdf_extract.cleanup.get_page_numbers(document, pages)
+		embedded_word_counts = [
+			len(document[page_number].get_text("words")) for page_number in page_numbers
+		]
+		results: list[pdf_extract.cleanup.PageResult] = []
+		for page_number, embedded_words in zip(page_numbers, embedded_word_counts):
+			page = document[page_number]
+			text = extract_ocr_page(page)
+			ocr_words = pdf_extract.cleanup.count_words(text)
+			results.append(
+				pdf_extract.cleanup.PageResult(
+					page_number, text, "ocr", embedded_words, ocr_words
+				)
+			)
+	finally:
+		document.close()
 	return results
