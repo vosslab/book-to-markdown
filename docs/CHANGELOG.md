@@ -10,6 +10,25 @@ All notable changes to this project are documented in this file.
 - Measure unresolved line-break hyphens across unprotected blank-line gaps while preserving the
   existing cleaned text and reporting the original prefix line.
 - Synchronized shared style guides, tests, and repository support files from the starter template.
+
+### Removals and Deprecations
+
+- Remove ten repository-owned test cases, including the parser-default and option-registration
+  modules, while retaining content-preservation, admission, and recovery checks.
+- Remove duplicated cleanup and validator assertions and custom test module-loading machinery.
+  Retain connector and markup preservation through output assertions in existing duplication tests.
+- Drop dedicated checks of CLI defaults, pytest option-registration details, terminal report wording,
+  and intermediate token representations. Vendored tests and shared dependencies remain unchanged.
+
+### Developer Tests and Notes
+
+- Pruning review baseline: all 94 repository-owned cases passed; the full suite reported 1,264
+  passes and the existing 1,005-line cleanup module failure in the vendored source-line gate.
+- After pruning, collection confirms 84 repository-owned cases across seven modules. All 60 affected
+  cases passed; the full suite reported 1,228 passes and only the same source-line gate failure.
+- Separately reproduced deduplication changing repeated prose inside fenced content even when the
+  auditor reports that content clean. This production defect remains outside test pruning.
+
 ## 2026-10-10
 
 ### Fixes and Maintenance

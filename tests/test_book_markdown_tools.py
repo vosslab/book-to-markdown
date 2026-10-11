@@ -181,15 +181,6 @@ def test_table_wrapper_keeps_prose_with_determinant_bars() -> None:
 	assert not issues and wrapped == text
 
 
-def test_delivery_validator_accepts_canonical_page_free_markdown(tmp_path: pathlib.Path) -> None:
-	"""A canonical filename and clean single-title document pass together."""
-	book_path = tmp_path / "Example_Computational_Geometry-2026.md"
-	book_path.write_text("# Example Computational Geometry\n\nReadable content.\n", encoding="ascii")
-	report = VALIDATE.validate_delivery(book_path)
-	assert report["status"] == "PASS"
-	assert not VALIDATE_V2.validate_filename(book_path)
-
-
 def test_public_validators_accept_undated_and_reject_malformed_suffixes(tmp_path: pathlib.Path) -> None:
 	"""Both delivery validators accept explicit unknown years and reject other suffixes."""
 	for filename in ("Example_Computational_Geometry-UNDATED.md", "Example_Computational_Geometry-2026.md"):
@@ -280,9 +271,12 @@ def test_v2_validator_rejects_unclosed_fence_and_concrete_residue() -> None:
 	unclosed = VALIDATE_V2.validate_text(path, "# Example Biology\n\n```text\npassage\n")
 	assert "unclosed-code-fence" in {issue.code for issue in unclosed}
 	residue = VALIDATE_V2.validate_text(
-		path, "# Example Biology\n\n<table>\n<tr><td>leftover</td></tr>\n</table>\n"
+		path, "# Example Biology\n\n![figure](figure.png)\n\n"
+		"<table>\n<tr><td>leftover</td></tr>\n</table>\n"
 	)
-	assert "indented-html-table" in {issue.code for issue in residue}
+	codes = {issue.code for issue in residue}
+	assert "indented-html-table" in codes
+	assert "image-markup" in codes
 
 
 def test_v2_validator_uses_commonmark_nested_fence_boundaries() -> None:
@@ -347,15 +341,6 @@ def test_v2_validator_uses_commonmark_nested_fence_boundaries() -> None:
 	# Four-space code is a code block, but it is not a fenced block to validate.
 	indented = "# Example Biology\n\n    ordinary code\n"
 	assert not VALIDATE_V2.validate_text(path, indented)
-
-	# These independent delivery checks still apply around fenced content.
-	residue = "# Example Biology\n\n![figure](figure.png)\n\n<table>\n<tr><td>x</td></tr>\n</table>\n"
-	issues = VALIDATE_V2.validate_text(path, residue)
-	codes = {issue.code for issue in issues}
-	assert "image-markup" in codes
-	assert "indented-html-table" in codes
-	controls = VALIDATE_V2.validate_text(path, "# Example Biology\n\nBad\x03text.\n")
-	assert "control-character" in {issue.code for issue in controls}
 
 
 def test_delivery_validator_ignores_markup_examples_inside_inline_code() -> None:

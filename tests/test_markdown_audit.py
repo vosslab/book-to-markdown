@@ -7,19 +7,6 @@ DUP = importlib.import_module("audit_markdown_duplication")
 RESIDUE = importlib.import_module("audit_markdown_residue")
 
 
-def test_line_duplicates_detects_genuine_stutter() -> None:
-	"""A content-word phrase repeated adjacently is a duplication, not an idiom."""
-	assert DUP.line_duplicates(["very", "difficult", "very", "difficult"]) == [(2, "very difficult")]
-
-
-def test_content_segments_split_at_connectors() -> None:
-	"""An X-to-X phrase splits at the connector, so no false adjacent duplicate."""
-	assert DUP.content_segments("research group to research group") == [
-		["research", "group"],
-		["research", "group"],
-	]
-
-
 def test_content_segments_drop_equation_speech() -> None:
 	"""Single-letter math tokens are dropped and short tokens never register."""
 	segments = DUP.content_segments("big R big R and mu m mu m")
@@ -32,18 +19,12 @@ def test_content_segments_drop_publisher_imprint() -> None:
 	assert all(DUP.line_duplicates(segment) == [] for segment in segments)
 
 
-def test_dedupe_line_collapses_one_duplicate() -> None:
-	"""One adjacent duplicate collapses to the first occurrence without a double space."""
-	deduped, removed = DUP.dedupe_line("very difficult very difficult to read")
-	assert removed == 1
-	assert deduped == "very difficult to read"
-
-
 def test_dedupe_line_preserves_idiom_and_case() -> None:
 	"""Idioms stay untouched and the first occurrence keeps its capitalization."""
-	deduped, removed = DUP.dedupe_line("One by one, Very difficult Very difficult to read")
+	text = "One by one, research group to research group, Very difficult Very difficult to read"
+	deduped, removed = DUP.dedupe_line(text)
 	assert removed == 1
-	assert deduped == "One by one, Very difficult to read"
+	assert deduped == "One by one, research group to research group, Very difficult to read"
 
 
 def test_audit_skips_code_and_table_content() -> None:
@@ -60,12 +41,12 @@ def test_glossary_definition_label_is_not_stutter() -> None:
 
 
 def test_dedupe_preserves_link_and_offsets() -> None:
-	"""Links stay intact and dedup offsets remain aligned around them."""
-	line = "See [this guide](http://example.com) then very difficult very difficult to read"
+	"""Links and bold markup survive removal of duplicated prose."""
+	prefix = "See [this guide](http://example.com) and **bold** then "
+	line = prefix + "very difficult very difficult to read"
 	deduped, removed = DUP.dedupe_line(line)
 	assert removed == 1
-	assert "[this guide](http://example.com)" in deduped
-	assert "very difficult very difficult" not in deduped
+	assert deduped == prefix + "very difficult to read"
 
 
 def test_audit_counts_bigram_trigram_and_fourgram() -> None:
@@ -86,11 +67,3 @@ def test_count_residue_detects_garbled_classes() -> None:
 	assert counts.fffd == 1
 	assert counts.setext_garbage_lines == 1
 	assert counts.dot_leader_runs == 1
-
-
-def test_strip_markdown_preserves_length_and_offsets() -> None:
-	"""Markdown blanking keeps string length and word offsets, so dedup stays aligned."""
-	line = "See [this guide](http://example.com) and **bold** very difficult very difficult"
-	stripped = DUP.strip_markdown(line)
-	assert len(stripped) == len(line)
-	assert stripped.find("very") == line.find("very")
