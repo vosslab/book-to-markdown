@@ -4,7 +4,7 @@ import pathlib
 
 import fitz
 
-import cleanup.clean_markdown
+import cleanup.layout
 import pdf_extract.cleanup
 import pdf_extract.raw_text
 
@@ -79,7 +79,7 @@ def test_raw_text_preserves_block_boundary_for_cleaner_reflow(tmp_path: pathlib.
 	document.close()
 
 	results = pdf_extract.raw_text.extract_raw_text(pdf_path, None)
-	cleaned = cleanup.clean_markdown.reflow(results[0].text)
+	cleaned = cleanup.layout.reflow(results[0].text)
 
 	assert results[0].text == "Abstract\n\nWrapped prose starts\nand continues within one text block."
 	assert cleaned == "Abstract\n\nWrapped prose starts and continues within one text block.\n"

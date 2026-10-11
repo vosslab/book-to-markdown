@@ -15,8 +15,8 @@ import pathlib
 import random
 import re
 import unicodedata
-from collections.abc import Callable
 
+import cleanup.layout
 import cleanup.reporting
 import markdown_quality
 
@@ -254,7 +254,7 @@ def normalize_br_tags(text: str, removals: list[Removal]) -> str:
 		replacement = " / " if is_markdown_pipe_table_row(line) else "\n"
 		def replace_chunk(chunk: str, _base_line: int) -> str:
 			return pattern.sub(replacement, chunk)
-		converted = transform_unprotected(line, replace_chunk)
+		converted = cleanup.layout.transform_unprotected(line, replace_chunk)
 		if converted != line:
 			record(removals, "html", "br tag converted", line, index + 1, index + 1)
 			lines[index] = converted
@@ -268,77 +268,6 @@ def is_markdown_pipe_table_row(line: str) -> bool:
 	if "|" not in stripped_line:
 		return False
 	return stripped_line.startswith("|") or stripped_line.endswith("|") or stripped_line.count("|") >= 2
-
-
-#============================================
-def protected_spans(
-		text: str, protect_indented: bool = True, protect_quotes: bool = True) -> list[tuple[int, int]]:
-	"""Return verbatim front matter, code, and quote spans for destructive passes."""
-	lines = text.splitlines(keepends=True)
-	spans = markdown_quality.inline_code_spans(text)
-	offset = 0
-	index = 0
-	if lines and lines[0].strip() == "---":
-		end = 1
-		while end < len(lines) and lines[end].strip() not in {"---", "..."}:
-			end += 1
-		if end < len(lines):
-			length = sum(len(line) for line in lines[:end + 1])
-			spans.append((0, length))
-			index = end + 1
-		offset = sum(len(line) for line in lines[:index])
-	in_fence = False
-	fence_marker = ""
-	span_start = 0
-	for line in lines[index:]:
-		stripped = line.lstrip()
-		fence = re.match(r"(`{3,}|~{3,})", stripped)
-		if fence and not in_fence:
-			in_fence = True
-			fence_marker = fence.group(1)[0]
-			span_start = offset
-		elif in_fence and fence and fence.group(1)[0] == fence_marker:
-			spans.append((span_start, offset + len(line)))
-			in_fence = False
-		elif not in_fence and (
-			(protect_indented and line.startswith(("    ", "\t")))
-			or (protect_quotes and stripped.startswith(">"))
-		):
-			spans.append((offset, offset + len(line)))
-		offset += len(line)
-	if in_fence:
-		spans.append((span_start, len(text)))
-	return merge_spans(spans)
-
-
-#============================================
-def merge_spans(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
-	"""Merge touching source spans so chunked transformations stay simple."""
-	merged: list[tuple[int, int]] = []
-	for start, end in sorted(spans):
-		if merged and start <= merged[-1][1]:
-			merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
-		else:
-			merged.append((start, end))
-	return merged
-
-
-#============================================
-def transform_unprotected(
-	text: str, transform: Callable[[str, int], str], protect_indented: bool = True,
-	protect_quotes: bool = True) -> str:
-	"""Apply a text transformer around source regions that must remain verbatim."""
-	chunks: list[str] = []
-	offset = 0
-	for start, end in protected_spans(text, protect_indented, protect_quotes):
-		base_line = text.count("\n", 0, start) + 1
-		chunks.append(transform(text[offset:start], base_line))
-		chunks.append(text[start:end])
-		offset = end
-	base_line = text.count("\n", 0, offset) + 1
-	chunks.append(transform(text[offset:], base_line))
-	output = "".join(chunks)
-	return output
 
 
 #============================================
@@ -382,7 +311,7 @@ def remove_images(text: str, removals: list[Removal]) -> str:
 			output.append(line)
 			index += 1
 		return "".join(output)
-	text = transform_unprotected(text, remove_picture_text)
+	text = cleanup.layout.transform_unprotected(text, remove_picture_text)
 	patterns = (
 		r"!\[[^\]]*\]\([^\n)]*\)",
 		r"<img\b[^>]*>",
@@ -396,7 +325,7 @@ def remove_images(text: str, removals: list[Removal]) -> str:
 				return ""
 			chunk = re.sub(pattern, replace, chunk, flags=re.IGNORECASE)
 		return chunk
-	cleaned = transform_unprotected(text, remove_chunk)
+	cleaned = cleanup.layout.transform_unprotected(text, remove_chunk)
 	return cleaned
 
 
@@ -516,13 +445,13 @@ def restore_escaped_known_markup(text: str) -> str:
 	pattern = re.compile(rf"&lt;/?(?:{tag_names})\b[^\n]*?&gt;", re.IGNORECASE)
 	def restore_chunk(chunk: str, _base_line: int) -> str:
 		return pattern.sub(lambda match: html.unescape(match.group(0)), chunk)
-	return transform_unprotected(text, restore_chunk)
+	return cleanup.layout.transform_unprotected(text, restore_chunk)
 
 
 #============================================
 def clean_html(text: str, removals: list[Removal]) -> str:
 	"""Convert complete allowlisted markup and escape every other angle form."""
-	text = transform_unprotected(
+	text = cleanup.layout.transform_unprotected(
 		text, lambda chunk, base_line: convert_sup_sub(chunk, removals, base_line),
 		protect_quotes=False,
 	)
@@ -530,7 +459,7 @@ def clean_html(text: str, removals: list[Removal]) -> str:
 		line = base_line + chunk.count("\n", 0, match.start())
 		record(removals, "html", "HTML comment removed", match.group(0), line, line)
 		return ""
-	text = transform_unprotected(
+	text = cleanup.layout.transform_unprotected(
 		text,
 		lambda chunk, base_line: re.sub(
 			r"<!--.*?-->", lambda item: comment_replace(item, chunk, base_line), chunk,
@@ -596,31 +525,8 @@ def clean_html(text: str, removals: list[Removal]) -> str:
 			return match.group(0).replace("<", "&lt;").replace(">", "&gt;")
 		chunk = re.sub(r"<[^\n]*>", escape_angle, chunk)
 		return chunk
-	cleaned = transform_unprotected(text, clean_chunk)
+	cleaned = cleanup.layout.transform_unprotected(text, clean_chunk)
 	return cleaned
-
-
-#============================================
-def protected_line(line: str, in_fence: bool) -> bool:
-	"""Identify structures whose layout must not be rewritten."""
-	stripped = line.lstrip()
-	protected = in_fence or line.startswith("|") or line.startswith(("    ", "\t"))
-	protected = protected or stripped.startswith(("#", "- ", "* ", "+ ", ">"))
-	protected = protected or bool(re.match(r"\d+[.)]\s", stripped))
-	return protected
-
-
-#============================================
-def protected_line_indices(text: str) -> set[int]:
-	"""Map protected character spans to lines they actually contain."""
-	protected_lines: set[int] = set()
-	for start, end in protected_spans(text):
-		if end <= start:
-			continue
-		start_line = text.count("\n", 0, start)
-		end_line = text.count("\n", 0, end - 1)
-		protected_lines.update(range(start_line, end_line + 1))
-	return protected_lines
 
 
 #============================================
@@ -630,7 +536,7 @@ def guarded_dehyphenate(text: str, removals: list[Removal]) -> str:
 	# A real occurrence elsewhere is evidence that an extraction split occurred;
 	# without it, retain a possibly meaningful technical compound.
 	word_forms = {word.lower() for word in re.findall(r"\b[A-Za-z]{4,}\b", text)}
-	protected_lines = protected_line_indices(text)
+	protected_lines = cleanup.layout.protected_line_indices(text)
 	output: list[str] = []
 	in_fence = False
 	index = 0
@@ -641,7 +547,10 @@ def guarded_dehyphenate(text: str, removals: list[Removal]) -> str:
 		if index + 1 < len(lines):
 			next_line = lines[index + 1]
 			can_join = index not in protected_lines and index + 1 not in protected_lines
-			can_join = can_join and not protected_line(line, in_fence) and not protected_line(next_line, in_fence)
+			can_join = (
+				can_join and not cleanup.layout.protected_line(line, in_fence)
+				and not cleanup.layout.protected_line(next_line, in_fence)
+			)
 			match = re.search(r"([A-Za-z]{3,})-\s*$", line)
 			if can_join and match and re.match(r"^[a-z]{2,}\b", next_line.lstrip()):
 				joined_word = match.group(1) + re.match(r"^[a-z]+", next_line.lstrip()).group(0)
@@ -664,7 +573,7 @@ def guarded_dehyphenate(text: str, removals: list[Removal]) -> str:
 def measure_unresolved_dehyphenation(text: str) -> tuple[int, list[dict[str, object]]]:
 	"""Count remaining unprotected line-break hyphens and retain bounded examples."""
 	lines = text.splitlines()
-	protected_lines = protected_line_indices(text)
+	protected_lines = cleanup.layout.protected_line_indices(text)
 	count = 0
 	examples: list[dict[str, object]] = []
 	in_fence = False
@@ -676,14 +585,17 @@ def measure_unresolved_dehyphenation(text: str) -> tuple[int, list[dict[str, obj
 			continue
 		next_index = index + 1
 		while next_index < len(lines) and not lines[next_index].strip():
-			if next_index in protected_lines or protected_line(lines[next_index], in_fence):
+			if next_index in protected_lines or cleanup.layout.protected_line(lines[next_index], in_fence):
 				break
 			next_index += 1
 		if next_index >= len(lines) or not lines[next_index].strip():
 			continue
 		next_line = lines[next_index]
 		can_measure = index not in protected_lines and next_index not in protected_lines
-		can_measure = can_measure and not protected_line(line, in_fence) and not protected_line(next_line, in_fence)
+		can_measure = (
+			can_measure and not cleanup.layout.protected_line(line, in_fence)
+			and not cleanup.layout.protected_line(next_line, in_fence)
+		)
 		match = re.search(r"([A-Za-z]{3,})-\s*$", line)
 		next_match = re.match(r"^[a-z]{2,}\b", next_line.lstrip())
 		if not can_measure or match is None or next_match is None:
@@ -714,7 +626,7 @@ def remove_figure_debris(text: str, removals: list[Removal], min_lines: int, cap
 	lines = text.splitlines()
 	remove_indices: set[int] = set()
 	protected_indices: set[int] = set()
-	for start, end in protected_spans(text):
+	for start, end in cleanup.layout.protected_spans(text):
 		protected_indices.update(range(text.count("\n", 0, start), text.count("\n", 0, end) + 1))
 	candidates = 0
 	ambiguous = 0
@@ -755,51 +667,6 @@ def remove_figure_debris(text: str, removals: list[Removal], min_lines: int, cap
 	kept = [line for number, line in enumerate(lines) if number not in remove_indices]
 	metrics = {"figure_debris_candidates": candidates, "figure_debris_removed_lines": len(remove_indices), "figure_debris_ambiguous_runs": ambiguous}
 	return "\n".join(kept), metrics
-
-
-#============================================
-def reflow(text: str) -> str:
-	"""Join ordinary extracted prose lines while preserving Markdown structures."""
-	lines = text.splitlines()
-	protected_source_lines: set[int] = set()
-	for start, end in protected_spans(text):
-		protected_source_lines.update(range(text.count("\n", 0, start), text.count("\n", 0, end) + 1))
-	blocks: list[str] = []
-	paragraph: list[str] = []
-	protected_block: list[str] = []
-	in_fence = False
-	setext_lines = {
-		index - 1 for index, line in enumerate(lines)
-		if index and re.fullmatch(r"\s*(?:=+|-+)\s*", line) is not None and lines[index - 1].strip()
-	}
-	def flush() -> None:
-		if paragraph:
-			blocks.append(" ".join(" ".join(paragraph).split()))
-			paragraph.clear()
-	def flush_protected() -> None:
-		if protected_block:
-			blocks.append("\n".join(protected_block))
-			protected_block.clear()
-	for index, line in enumerate(lines):
-		if line.strip().startswith("```"):
-			flush()
-			protected_block.append(line)
-			in_fence = not in_fence
-			continue
-		if not line.strip():
-			flush()
-			flush_protected()
-			continue
-		if index in protected_source_lines or index in setext_lines or re.fullmatch(r"\s*(?:=+|-+)\s*", line) is not None or protected_line(line, in_fence):
-			flush()
-			protected_block.append(line.rstrip())
-		else:
-			flush_protected()
-			paragraph.append(line.strip())
-	flush()
-	flush_protected()
-	output = "\n\n".join(blocks).strip() + "\n"
-	return output
 
 
 #============================================
@@ -901,7 +768,7 @@ def clean_text(text: str, skipped: set[str], min_lines: int, caption_window: int
 	if "images" not in skipped:
 		text = remove_images(text, removals)
 	if "reflow" not in skipped:
-		text = reflow(text)
+		text = cleanup.layout.reflow(text)
 	if "ascii" not in skipped:
 		# Protected regions keep their Markdown layout during structural passes, but
 		# they still need character conversion before the ASCII-only output is written.

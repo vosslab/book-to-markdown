@@ -13,6 +13,8 @@ DjVu, and text into one page-free Markdown file per title. Scripts are grouped i
 - Shared libraries at the repository root: `markdown_quality.py` and the `pdf_extract/` package.
 - Cleaning and repair in `cleanup/`: `clean_markdown.py`, `wrap_malformed_tables.py`,
   `compare_markdown_candidates.py`, and `mathml_to_latex.py`.
+  [layout.py](../cleanup/layout.py) owns protected Markdown spans, line boundaries, and prose reflow;
+  the cleanup CLI owns pass ordering and audit records, and `reporting.py` renders run reports.
 - Validation and auditing in `audit/`: `validate_markdown_v2.py`,
   `validate_markdown_delivery.py`, `promote_validated_candidate.py`, duplication/residue audits,
   and source archival.

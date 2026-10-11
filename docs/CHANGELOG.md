@@ -6,6 +6,9 @@ All notable changes to this project are documented in this file.
 
 ### Fixes and Maintenance
 
+- Extract protected Markdown regions and prose reflow into `cleanup/layout.py`, reducing
+  `cleanup/clean_markdown.py` below the source-line warning threshold while preserving pass ordering,
+  CLI output, metrics, and removal sidecars. Update the PDF reflow test to use the layout owner.
 - Preserve distinct standalone numbered chapter, part, and appendix labels while measuring PDF running heads.
 - Measure unresolved line-break hyphens across unprotected blank-line gaps while preserving the
   existing cleaned text and reporting the original prefix line.
@@ -22,6 +25,8 @@ All notable changes to this project are documented in this file.
 
 ### Developer Tests and Notes
 
+- Verified the layout extraction with 77 temporary before/after checks covering pass combinations,
+  unchanged helper bodies, CLI output, JSON reports, and removal sidecars; removed the temporary checks.
 - Pruning review baseline: all 94 repository-owned cases passed; the full suite reported 1,264
   passes and the existing 1,005-line cleanup module failure in the vendored source-line gate.
 - After pruning, collection confirms 84 repository-owned cases across seven modules. All 60 affected

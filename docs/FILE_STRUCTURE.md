@@ -3,7 +3,8 @@
 ## Top-level layout
 
 - `extract/` - source-to-Markdown extraction scripts and the Pandoc filter.
-- `cleanup/` - cleaning and repair scripts.
+- `cleanup/` - cleaning and repair scripts, with Markdown layout helpers in
+  [layout.py](../cleanup/layout.py) and report rendering in `reporting.py`.
 - `audit/` - validation, auditing, archival, and canonical-promotion scripts.
 - `markdown_quality.py` - shared Markdown cleaning utilities.
 - `pdf_extract/` - PDF extraction helpers used by extractors.
