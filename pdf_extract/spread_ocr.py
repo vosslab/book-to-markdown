@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-import fitz
+import pymupdf
 
 
 #============================================
@@ -23,14 +23,14 @@ def ocr_half(pdf_path: str, page_idx: int, side: str, dpi: int, tesseract: str) 
 	Returns:
 		tuple[int, str, str]: (page_idx, side, OCR text).
 	"""
-	document = fitz.open(pdf_path)
+	document = pymupdf.open(pdf_path)
 	page = document[page_idx]
 	width = page.rect.width
 	if side == "L":
-		clip = fitz.Rect(0, 0, width / 2, page.rect.height)
+		clip = pymupdf.Rect(0, 0, width / 2, page.rect.height)
 	else:
-		clip = fitz.Rect(width / 2, 0, width, page.rect.height)
-	pixmap = page.get_pixmap(matrix=fitz.Matrix(dpi / 72, dpi / 72), alpha=False, clip=clip)
+		clip = pymupdf.Rect(width / 2, 0, width, page.rect.height)
+	pixmap = page.get_pixmap(matrix=pymupdf.Matrix(dpi / 72, dpi / 72), alpha=False, clip=clip)
 	png = os.path.join(tempfile.gettempdir(), f"half_{page_idx}_{side}_{os.getpid()}.png")
 	pixmap.save(png)
 	document.close()
@@ -68,7 +68,7 @@ def extract_spread_halves(
 		tesseract: Tesseract binary path.
 		pages: Zero-based PDF page indices, or None for every page.
 	"""
-	document = fitz.open(input_path)
+	document = pymupdf.open(input_path)
 	page_count = document.page_count
 	document.close()
 	selected = pages if pages is not None else list(range(page_count))

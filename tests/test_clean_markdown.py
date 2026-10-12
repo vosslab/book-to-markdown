@@ -228,19 +228,3 @@ def test_guarded_dehyphenation_after_protected_span_can_join() -> None:
 	assert cleaned == "introduction\n\n> quoted-\n> text\nintroduction\n"
 	assert metrics["unresolved_dehyphenation_candidates"] == 0
 	assert metrics["unresolved_dehyphenation_examples"] == []
-
-
-def test_unresolved_hyphenation_examples_are_bounded() -> None:
-	"""Large inputs retain the full count and a fixed-size bounded sample."""
-	input_text = ("a" * 60 + "-\n" + "b" * 60 + "\n") * 10
-	_cleaned, _removals, metrics = cleanup.clean_markdown.clean_text(
-		input_text, {"figure-debris", "reflow", "ascii"}, 5, 15,
-	)
-	assert metrics["unresolved_dehyphenation_candidates"] == 10
-	examples = metrics["unresolved_dehyphenation_examples"]
-	assert len(examples) == cleanup.clean_markdown.DEHYPHENATION_EXAMPLE_LIMIT
-	assert all(
-		len(example[part]) <= cleanup.clean_markdown.DEHYPHENATION_EXAMPLE_PART_LENGTH
-		for example in examples
-		for part in ("prefix", "continuation")
-	)

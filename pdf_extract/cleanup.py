@@ -5,7 +5,7 @@ import dataclasses
 import pathlib
 import re
 
-import fitz
+import pymupdf
 
 import pdf_extract.models
 import pdf_extract.page_cleanup
@@ -38,7 +38,7 @@ def parse_pages(pages_text: str | None) -> list[int] | None:
 	return page_numbers
 
 #============================================
-def get_page_numbers(document: fitz.Document, pages: list[int] | None) -> list[int]:
+def get_page_numbers(document: pymupdf.Document, pages: list[int] | None) -> list[int]:
 	"""Return selected zero-based page numbers after validating their bounds."""
 	page_numbers = list(range(document.page_count)) if pages is None else pages
 	for page_number in page_numbers:
@@ -162,7 +162,7 @@ def page_evidence(results: list[pdf_extract.models.PageResult]) -> dict[str, int
 #============================================
 def build_frontmatter(input_path: pathlib.Path) -> str:
 	"""Build a small YAML metadata block from PDF document metadata."""
-	document = fitz.open(input_path)
+	document = pymupdf.open(input_path)
 	metadata = document.metadata
 	document.close()
 	title = metadata["title"].strip() if metadata["title"] else input_path.stem

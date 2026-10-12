@@ -4,8 +4,20 @@ All notable changes to this project are documented in this file.
 
 ## 2026-10-11
 
+### Additions and New Features
+
+- Add a reproducible README cleanup demonstration and its terminal-style PNG capture, generated
+  from actual cleanup and validation CLI output on an authored sample. Capture verified on
+  2026-10-12 at 01:01 UTC: `docs/screenshots/cleanup_demo.png`, 1280 by 800 pixels, about 125 KB.
+- Add file-format, development, troubleshooting, related-project, news, and release-history
+  documentation. Refresh the README, install/usage guides, architecture, and file map.
+
 ### Fixes and Maintenance
 
+- Remove the temporary SWIG warning filters and switch legacy `fitz` imports, calls, and type
+  annotations directly to `pymupdf`, without aliases. Tests import the dependency directly.
+  Keep the unmodified upstream PyMuPDF dependency; its macOS SWIG warnings remain visible pending
+  an upstream wheel fix. Do not maintain a custom dependency build for this warning.
 - Split promotion admission/configuration into `audit/promotion_admission.py`, leaving filesystem
   publication in `audit/promote_validated_candidate.py`. Preserve validation ordering, locks,
   predecessor backups, and recovery behavior.
@@ -23,6 +35,10 @@ All notable changes to this project are documented in this file.
 
 ### Removals and Deprecations
 
+- Remove two more repository-owned cases (80 lines): the nested CommonMark fence parsing matrix
+  and the internal dehyphenation diagnostic sample-cap assertion. Retain ordinary valid/unclosed
+  fence checks and cleanup output/metric coverage. The removed tests no longer guard nested fence
+  edge cases or the exact diagnostic sample limit; vendored tests remain unchanged.
 - Make `mobi` an on-demand AZW3 extra in `pip_extra.txt` instead of a core requirement.
   Load it only during extraction, with an installation message when absent. Remove the two
   mocked unpacking cleanup tests; retain dependency-free AZW3 renderer coverage.
@@ -36,7 +52,7 @@ All notable changes to this project are documented in this file.
 ### Developer Tests and Notes
 
 - Promotion and PDF module splits pass the full suite (1,277 tests), with no source-size warnings.
-  Temporary promotion checks verified preserved definitions and new-title publication; removed
+  Temporary checks verified preserved promotion/PDF definitions and new-title publication; removed
   those checks after verification. No permanent tests were added for the splits.
 - Verified the layout extraction with 77 temporary before/after checks covering pass combinations,
   unchanged helper bodies, CLI output, JSON reports, and removal sidecars; removed the temporary checks.

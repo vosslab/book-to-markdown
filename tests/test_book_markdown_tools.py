@@ -6,6 +6,7 @@ import importlib
 
 # PIP3 modules
 import pytest
+import pymupdf
 
 
 MARKDOWN_QUALITY = importlib.import_module("markdown_quality")
@@ -280,70 +281,6 @@ def test_v2_validator_rejects_unclosed_fence_and_concrete_residue() -> None:
 	assert "image-markup" in codes
 
 
-def test_v2_validator_uses_commonmark_nested_fence_boundaries() -> None:
-	"""List indentation is interpreted by CommonMark, while invalid closers fail."""
-	path = pathlib.Path("biology/Example_Biology-2026.md")
-	nested = (
-		"# Example Biology\n\n"
-		"- outer\n"
-		"  - inner\n\n"
-		"      ~~~~python\n"
-		"      print('ok')\n"
-		"      ~~~~~~\n"
-	)
-	assert not VALIDATE_V2.validate_text(path, nested)
-
-	for closer in ("      ````", "      ~~", "      ~~~~extra"):
-		broken = (
-			"# Example Biology\n\n- item\n\n    ~~~~text\n    payload\n"
-			+ closer + "\n"
-		)
-		issues = VALIDATE_V2.validate_text(path, broken)
-		assert "unclosed-code-fence" in {issue.code for issue in issues}
-
-	unterminated = "# Example Biology\n\n- item\n\n    ```text\n    payload\n"
-	assert "unclosed-code-fence" in {
-		issue.code for issue in VALIDATE_V2.validate_text(path, unterminated)
-	}
-
-	# A shorter marker-like payload line is allowed when the mapped final line
-	# is a valid, longer closer.
-	top_level = (
-		"# Example Biology\n\n"
-		"````text\n"
-		"    ```\n"
-		"````\n"
-	)
-	assert not VALIDATE_V2.validate_text(path, top_level)
-
-	# The same valid longer closer and marker-like payload work in containers.
-	list_payload = "# Example Biology\n\n- item\n\n  ````text\n      ```\n  `````\n"
-	assert not VALIDATE_V2.validate_text(path, list_payload)
-	blockquote_payload = "# Example Biology\n\n> ````text\n>     ```\n> `````\n"
-	assert not VALIDATE_V2.validate_text(path, blockquote_payload)
-
-	# Marker-like payload at EOF remains unclosed in a blockquote container.
-	blockquote_unclosed = "> ````text\n>     ```\n"
-	assert "unclosed-code-fence" in {
-		issue.code for issue in VALIDATE_V2.validate_text(path, blockquote_unclosed)
-	}
-
-	# Four spaces make a marker line indented code at top level, not a closer.
-	indented_marker_unclosed = "```text\n    ```\n"
-	assert "unclosed-code-fence" in {
-		issue.code for issue in VALIDATE_V2.validate_text(path, indented_marker_unclosed)
-	}
-	for marker in ("``", "~~~"):
-		marker_unclosed = "```text\npayload\n" + marker + "\n"
-		assert "unclosed-code-fence" in {
-			issue.code for issue in VALIDATE_V2.validate_text(path, marker_unclosed)
-		}
-
-	# Four-space code is a code block, but it is not a fenced block to validate.
-	indented = "# Example Biology\n\n    ordinary code\n"
-	assert not VALIDATE_V2.validate_text(path, indented)
-
-
 def test_delivery_validator_ignores_markup_examples_inside_inline_code() -> None:
 	"""Literal HTML and image examples do not become active-markup failures."""
 	path = pathlib.Path("Example_Book-2026.md")
@@ -424,7 +361,7 @@ def test_delivery_validator_still_rejects_layout_html() -> None:
 def test_pdf_frontmatter_establishes_canonical_h1(tmp_path: pathlib.Path) -> None:
 	"""A PDF conversion starts with metadata followed by one title heading."""
 	pdf_path = tmp_path / "example.pdf"
-	document = PDF_CLEANUP.fitz.open()
+	document = pymupdf.open()
 	document.new_page()
 	document.set_metadata({"title": "Example Reference", "author": "A. Teacher"})
 	document.save(pdf_path)

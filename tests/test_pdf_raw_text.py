@@ -2,7 +2,7 @@
 
 import pathlib
 
-import fitz
+import pymupdf
 
 import cleanup.layout
 import pdf_extract.models
@@ -14,12 +14,12 @@ import pdf_extract.raw_text
 def test_raw_text_preserves_explicit_superscript_and_ordinary_layout(tmp_path: pathlib.Path) -> None:
 	"""Raised spans gain ASCII exponent markup while ordinary text and lines remain readable."""
 	pdf_path = tmp_path / "superscript.pdf"
-	document = fitz.open()
+	document = pymupdf.open()
 	page = document.new_page()
 	page.insert_text((72, 100), "Ordinary prose 10 ")
-	raised_x = 72 + fitz.get_text_length("Ordinary prose 10 ")
+	raised_x = 72 + pymupdf.get_text_length("Ordinary prose 10 ")
 	page.insert_text((raised_x, 97), "9")
-	citation_x = raised_x + fitz.get_text_length("9")
+	citation_x = raised_x + pymupdf.get_text_length("9")
 	page.insert_text((citation_x, 100), " citation 7")
 	page.insert_text((72, 130), "Next line has spaced text")
 	document.save(pdf_path)
@@ -37,7 +37,7 @@ def test_raw_text_recovers_geometric_word_gap_without_splitting_styled_word(
 	) -> None:
 	"""A missing PDF space is restored while touching glyphs across font spans remain joined."""
 	pdf_path = tmp_path / "geometric-word-gap.pdf"
-	document = fitz.open()
+	document = pymupdf.open()
 	page = document.new_page()
 	page.insert_text((72, 100), "processes,mimicking", fontsize=10, fontname="tiro")
 	content_xref = page.get_contents()[0]
@@ -51,7 +51,7 @@ def test_raw_text_recovers_geometric_word_gap_without_splitting_styled_word(
 	assert b"<" + joined_hex + b">" in content
 	document.update_stream(content_xref, content.replace(b"<" + joined_hex + b">", b"<" + split_hex + b">", 1))
 	page.insert_text((72, 130), "gene", fontsize=10, fontname="tiro")
-	styled_start = 72 + fitz.get_text_length("gene", fontname="tiro", fontsize=10)
+	styled_start = 72 + pymupdf.get_text_length("gene", fontname="tiro", fontsize=10)
 	page.insert_text((styled_start, 130), "alogy", fontsize=10, fontname="tiit")
 	page.insert_text((72, 160), "AVATARoffice x=2", fontsize=10, fontname="tiro")
 	document.save(pdf_path)
@@ -69,11 +69,11 @@ def test_raw_text_recovers_geometric_word_gap_without_splitting_styled_word(
 def test_raw_text_preserves_block_boundary_for_cleaner_reflow(tmp_path: pathlib.Path) -> None:
 	"""Separate PDF blocks survive reflow while wrapped lines within a block join."""
 	pdf_path = tmp_path / "block-boundaries.pdf"
-	document = fitz.open()
+	document = pymupdf.open()
 	page = document.new_page()
 	page.insert_text((72, 100), "Abstract")
 	page.insert_textbox(
-		fitz.Rect(72, 120, 400, 170),
+		pymupdf.Rect(72, 120, 400, 170),
 		"Wrapped prose starts\nand continues within one text block.",
 	)
 	document.save(pdf_path)

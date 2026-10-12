@@ -1,14 +1,14 @@
 """OCR text extraction for the PDF to Markdown pipeline."""
 
 import pathlib
-import fitz
+import pymupdf
 
 import pdf_extract.cleanup
 import pdf_extract.models
 import pdf_extract.text
 
 #============================================
-def extract_ocr_page(page: fitz.Page) -> str:
+def extract_ocr_page(page: pymupdf.Page) -> str:
 	"""Extract one OCR text page with PyMuPDF's Tesseract bridge."""
 	try:
 		textpage = page.get_textpage_ocr(full=True, dpi=300)
@@ -38,7 +38,7 @@ def extract_ocr_text(input_path: pathlib.Path, pages: list[int] | None) -> list[
 	Returns:
 		list[pdf_extract.models.PageResult]: One OCR page result per selected page.
 	"""
-	document = fitz.open(input_path)
+	document = pymupdf.open(input_path)
 	try:
 		# Validate page indexes before accessing selected pages.
 		page_numbers = pdf_extract.cleanup.get_page_numbers(document, pages)

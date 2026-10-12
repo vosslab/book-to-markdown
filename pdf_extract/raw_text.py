@@ -2,7 +2,7 @@
 
 import pathlib
 
-import fitz
+import pymupdf
 
 import pdf_extract.cleanup
 import pdf_extract.models
@@ -52,7 +52,7 @@ def _join_line_spans(
 				span_parts.append(" ")
 			span_parts.append(character["c"])
 		span_text = "".join(span_parts)
-		if span["flags"] & fitz.TEXT_FONT_SUPERSCRIPT and span_text.strip():
+		if span["flags"] & pymupdf.TEXT_FONT_SUPERSCRIPT and span_text.strip():
 			leading_space = span_text[:len(span_text) - len(span_text.lstrip())]
 			trailing_space = span_text[len(span_text.rstrip()):]
 			content = span_text.strip()
@@ -74,12 +74,12 @@ def extract_raw_text(input_path: pathlib.Path, pages: list[int] | None) -> list[
 	Returns:
 		list[pdf_extract.models.PageResult]: One page result per selected page.
 	"""
-	document = fitz.open(input_path)
+	document = pymupdf.open(input_path)
 	page_numbers = pdf_extract.cleanup.get_page_numbers(document, pages)
 	results: list[pdf_extract.models.PageResult] = []
 	for page_number in page_numbers:
 		page = document[page_number]
-		page_data = page.get_text("rawdict", flags=fitz.TEXTFLAGS_TEXT)
+		page_data = page.get_text("rawdict", flags=pymupdf.TEXTFLAGS_TEXT)
 		text_blocks: list[str] = []
 		for block in page_data["blocks"]:
 			if block["type"] != 0:

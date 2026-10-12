@@ -2,58 +2,77 @@
 
 ## Overview
 
-`book-to-markdown` converts technical and scientific books from PDF, EPUB, HTML, DOCX, ODT,
-DjVu, and text into one page-free Markdown file per title. Scripts are grouped into `extract/`,
-`cleanup/`, and `audit/`, with shared libraries at the repository root and tests under `tests/`.
+`book-to-markdown` converts technical and scientific books into one page-free Markdown file per
+title. The Python command-line tools form an extraction, cleanup, audit, and promotion pipeline.
+They run from the repository root after [`source_me.sh`](../source_me.sh) makes the root importable.
 
 ## Major components
 
-- Extraction CLIs in `extract/`: raw-text PDF extraction, OCR PDF extraction, EPUB structure
-  inspection, EPUB OCR, and the Pandoc semantic filter `semantic_markdown.lua`.
-- Shared libraries at the repository root: `markdown_quality.py` and the `pdf_extract/` package.
-  Within `pdf_extract/`, `models.py` owns page and conversion records, `page_cleanup.py` owns
-  page-aware running-head, page-number, picture-block, and numbered-heading cleanup, and `text.py`
-  owns text normalization and page-seam joining. `cleanup.py` coordinates conversion, scoring,
-  and reporting.
-- Cleaning and repair in `cleanup/`: `clean_markdown.py`, `wrap_malformed_tables.py`,
-  `compare_markdown_candidates.py`, and `mathml_to_latex.py`.
-  [layout.py](../cleanup/layout.py) owns protected Markdown spans, line boundaries, and prose reflow;
-  the cleanup CLI owns pass ordering and audit records, and `reporting.py` renders run reports.
-- Validation and auditing in `audit/`: `validate_markdown_v2.py`,
-  `validate_markdown_delivery.py`, `promote_validated_candidate.py`, duplication/residue audits,
-  and source archival.
-  [promotion_admission.py](../audit/promotion_admission.py) owns lifecycle configuration,
-  source-review admission, content checks, and validator execution; the promoter owns filesystem
-  locks, snapshots, backups, and publication.
+- [`extract/`](../extract/) contains format-specific command-line entry points. PDF commands use
+  the shared [`pdf_extract/`](../pdf_extract/) package; EPUB tools inspect or repair archive
+  structure; [`azw3_to_markdown.py`](../extract/azw3_to_markdown.py) decodes supported AZW3 input.
+- [`pdf_extract/models.py`](../pdf_extract/models.py) defines page, removal, running-head, and
+  conversion records. [`raw_text.py`](../pdf_extract/raw_text.py) reads a PDF text layer and
+  restores explicit superscripts; [`ocr_text.py`](../pdf_extract/ocr_text.py) obtains OCR text;
+  [`spread_ocr.py`](../pdf_extract/spread_ocr.py) handles two-page scans.
+- [`pdf_extract/text.py`](../pdf_extract/text.py) normalizes page text and joins eligible page
+  seams. [`page_cleanup.py`](../pdf_extract/page_cleanup.py) identifies running heads, edge page
+  numbers, picture blocks, and numbered headings. [`cleanup.py`](../pdf_extract/cleanup.py)
+  coordinates conversion, scoring, report data, and removal sidecars.
+- [`cleanup/clean_markdown.py`](../cleanup/clean_markdown.py) applies the auditable Markdown
+  cleanup pipeline. [`cleanup/layout.py`](../cleanup/layout.py) protects Markdown structure and
+  reflows ordinary prose; [`reporting.py`](../cleanup/reporting.py) renders the cleanup report.
+  The remaining cleanup commands repair tables and pipe artifacts, combine OCR halves, compare
+  candidates, or convert MathML.
+- [`markdown_quality.py`](../markdown_quality.py) supplies Markdown-aware helpers shared by
+  extraction, cleanup, and audit code.
+- [`audit/`](../audit/) validates staged Markdown, detects duplication and residue, archives
+  processed sources, and promotes accepted candidates. [`promotion_admission.py`](../audit/promotion_admission.py)
+  owns lifecycle configuration, admission evidence, and validator invocation; [`promote_validated_candidate.py`](../audit/promote_validated_candidate.py)
+  owns locks, snapshots, backups, atomic publication, and readback verification.
 
 ## Data flow
 
-1. Choose a source format and run the matching extractor in `extract/`.
-2. Clean and repair Markdown with `cleanup/clean_markdown.py`.
-3. Validate the staged candidate with the delivery and v2 validators.
-4. Bind validation evidence and an explicit lifecycle in candidate-adjacent `admission_gate.json`.
-5. Use `audit/promote_validated_candidate.py` to publish. For repairs to an existing canonical
-   book, `DIRECT_CANONICAL_REPLACEMENT` is the primary lifecycle: admission and an independent
-   review receipt bind the destination and predecessor path/hash; the promoter rechecks predecessor
-   identity and hash under the visible title lock, creates and verifies an exclusive predecessor
-   backup, then uses `os.replace` and canonical readback. The canonical path stays present, with no
-   PENDING gap. The legacy `SUPERSEDES_PENDING` five-positional lifecycle remains for a real
-   PENDING predecessor. `NEW_TITLE_NO_PREDECESSOR` remains for a new title and requires an explicit
-   accepted admission status, the expected-absent PENDING path, a destination lock, and verified
-   snapshot for atomic no-clobber publication.
-6. Canonical hash readback and synchronization establish promotion; the promoter retains the staged
-   candidate rather than unlinking its mutable path after commit.
-7. A separate receipt owner writes the external receipt and sidecar, then an independent strict
-   closure step verifies lifecycle authority and identity before any staged-candidate reclamation.
+1. An entry point in [`extract/`](../extract/) reads a source format and writes staged Markdown or
+   page-marked text. PDF paths create per-page records before flattening pages.
+2. [`pdf_extract/text.py`](../pdf_extract/text.py) joins eligible page seams, while
+   [`pdf_extract/page_cleanup.py`](../pdf_extract/page_cleanup.py) records page-aware removals.
+   [`pdf_extract/cleanup.py`](../pdf_extract/cleanup.py) writes Markdown, report JSON, and a
+   removal sidecar for PDF conversions.
+3. [`cleanup/clean_markdown.py`](../cleanup/clean_markdown.py) applies conservative cleanup
+   passes. Each removal is recorded and the command can measure or skip individual passes for
+   comparison.
+4. [`audit/validate_markdown_v2.py`](../audit/validate_markdown_v2.py) and
+   [`audit/validate_markdown_delivery.py`](../audit/validate_markdown_delivery.py) validate a
+   staged candidate. The duplication and residue commands provide additional diagnostic evidence.
+5. [`audit/promote_validated_candidate.py`](../audit/promote_validated_candidate.py) reads the
+   candidate-adjacent admission record through [`audit/promotion_admission.py`](../audit/promotion_admission.py),
+   revalidates the admitted content, and publishes it with the selected lifecycle.
 
 ## Testing and verification
 
-Tests live in `tests/` and run with `pytest` after `source source_me.sh`, which puts the
-repository root on `PYTHONPATH` for scripts in `extract/`, `cleanup/`, and `audit/`.
+- [`tests/`](../tests/) contains the pytest suite, including import, style, security, source-size,
+  and behavior tests. Run it with `source source_me.sh && pytest tests/`.
+- [`pytest.ini`](../pytest.ini) disables pytest's cache provider. [`tests/conftest.py`](../tests/conftest.py)
+  configures test-time warning behavior.
+- [`docs/E2E_TESTS.md`](E2E_TESTS.md) describes the separately scoped end-to-end evidence lane.
 
 ## Extension points
 
-- Add an extractor CLI in `extract/` and import `markdown_quality.py` or `pdf_extract/` for
-  shared cleanup behavior.
-- Add audit detectors in `audit/audit_markdown_*.py`.
-- Extend `extract/semantic_markdown.lua` for heading or semantic rules.
+- Add a source-format entry point under [`extract/`](../extract/) and reuse the relevant
+  [`pdf_extract/`](../pdf_extract/) module or [`markdown_quality.py`](../markdown_quality.py)
+  helper instead of duplicating page or Markdown logic.
+- Add a cleanup pass to [`cleanup/clean_markdown.py`](../cleanup/clean_markdown.py) when it belongs
+  in the ordered cleanup pipeline. Put reusable protected-span or reflow behavior in
+  [`cleanup/layout.py`](../cleanup/layout.py).
+- Add a page-aware PDF transformation to [`pdf_extract/page_cleanup.py`](../pdf_extract/page_cleanup.py)
+  and preserve its removal record in the conversion result.
+- Add a new diagnostic under [`audit/`](../audit/) when it produces evidence distinct from the
+  structural validators. Extend admission policy in
+  [`audit/promotion_admission.py`](../audit/promotion_admission.py), while publication mechanics
+  remain in [`audit/promote_validated_candidate.py`](../audit/promote_validated_candidate.py).
+
+## Known gaps
+
+- Verify an end-to-end sample for each supported source format before claiming uniform conversion
+  quality across PDF, EPUB, and AZW3 inputs.
