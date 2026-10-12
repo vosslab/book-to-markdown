@@ -13,8 +13,6 @@ import zipfile
 
 # PIP3 modules
 import lxml.etree
-import mobi
-import mobi.kindleunpack
 
 
 HUFF_COMPRESSION = 0x4448
@@ -264,6 +262,15 @@ def epub_spine_html(epub_path: pathlib.Path) -> str:
 #============================================
 def extract_azw3_text(source_path: pathlib.Path) -> str:
 	"""Recover ordered reading XHTML with the installed Mobipocket decoder."""
+	try:
+		import mobi.kindleunpack
+	except ModuleNotFoundError as error:
+		if error.name != "mobi":
+			raise
+		raise ModuleNotFoundError(
+			"AZW3 extraction requires the optional mobi package. "
+			"Install it with: python3 -m pip install -r pip_extra.txt"
+		) from error
 	huffdic_header(source_path)
 	with tempfile.TemporaryDirectory(prefix="azw3_mobi_") as temporary_root:
 		mobi.kindleunpack.unpackBook(str(source_path), temporary_root, epubver="A")

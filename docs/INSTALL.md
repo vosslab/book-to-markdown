@@ -13,6 +13,8 @@ One paragraph: "installed" means the toolchain scripts in `extract/`, `cleanup/`
 - Clone or obtain the repository source.
 - Run `source source_me.sh` to set the Python environment and put the repo root on `PYTHONPATH`.
 - Install Python dependencies with `pip install -r pip_requirements.txt`.
+- For AZW3 extraction only, install the optional `mobi` dependency with
+  `python3 -m pip install -r pip_extra.txt`.
 
 ## Verify install
 

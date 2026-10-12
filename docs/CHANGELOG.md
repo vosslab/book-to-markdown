@@ -16,6 +16,9 @@ All notable changes to this project are documented in this file.
 
 ### Removals and Deprecations
 
+- Make `mobi` an on-demand AZW3 extra in `pip_extra.txt` instead of a core requirement.
+  Load it only during extraction, with an installation message when absent. Remove the two
+  mocked unpacking cleanup tests; retain dependency-free AZW3 renderer coverage.
 - Remove ten repository-owned test cases, including the parser-default and option-registration
   modules, while retaining content-preservation, admission, and recovery checks.
 - Remove duplicated cleanup and validator assertions and custom test module-loading machinery.
