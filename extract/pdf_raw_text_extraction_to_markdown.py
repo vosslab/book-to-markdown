@@ -6,6 +6,7 @@ import json
 import pathlib
 
 import pdf_extract.cleanup
+import pdf_extract.page_cleanup
 import pdf_extract.raw_text
 
 
@@ -47,7 +48,7 @@ def main() -> None:
 	input_path = pathlib.Path(args.pdf)
 	output_path = pathlib.Path(args.output_file) if args.output_file else input_path.with_suffix(".md")
 	pages = pdf_extract.cleanup.parse_pages(args.pages)
-	running_head_defaults = pdf_extract.cleanup.effective_running_head_defaults(args)
+	running_head_defaults = pdf_extract.page_cleanup.effective_running_head_defaults(args)
 	extracted_pages = pdf_extract.raw_text.extract_raw_text(input_path, pages)
 	if args.measure_only:
 		result = pdf_extract.cleanup.measure_pages(extracted_pages, "raw_text", running_head_defaults)

@@ -6,6 +6,13 @@ All notable changes to this project are documented in this file.
 
 ### Fixes and Maintenance
 
+- Split promotion admission/configuration into `audit/promotion_admission.py`, leaving filesystem
+  publication in `audit/promote_validated_candidate.py`. Preserve validation ordering, locks,
+  predecessor backups, and recovery behavior.
+- Split PDF page-aware cleanup into `pdf_extract/page_cleanup.py` and shared records into
+  `pdf_extract/models.py`, with normalization and page joining in `pdf_extract/text.py`.
+  Update consumers to import each owner directly while preserving
+  cleanup ordering, scoring, and reports.
 - Extract protected Markdown regions and prose reflow into `cleanup/layout.py`, reducing
   `cleanup/clean_markdown.py` below the source-line warning threshold while preserving pass ordering,
   CLI output, metrics, and removal sidecars. Update the PDF reflow test to use the layout owner.
@@ -28,6 +35,9 @@ All notable changes to this project are documented in this file.
 
 ### Developer Tests and Notes
 
+- Promotion and PDF module splits pass the full suite (1,277 tests), with no source-size warnings.
+  Temporary promotion checks verified preserved definitions and new-title publication; removed
+  those checks after verification. No permanent tests were added for the splits.
 - Verified the layout extraction with 77 temporary before/after checks covering pass combinations,
   unchanged helper bodies, CLI output, JSON reports, and removal sidecars; removed the temporary checks.
 - Pruning review baseline: all 94 repository-owned cases passed; the full suite reported 1,264

@@ -9,10 +9,10 @@ import pathlib
 import pytest
 
 # Local
-import promote_validated_candidate as promoter
+import audit.promotion_admission as admission
 
 
-def make_admission(tmp_path: pathlib.Path, basis: str) -> promoter.PromotionConfig:
+def make_admission(tmp_path: pathlib.Path, basis: str) -> admission.PromotionConfig:
 	"""Write a minimal candidate-bound new-title admission package."""
 	stage = tmp_path / "stage"
 	stage.mkdir()
@@ -45,14 +45,14 @@ def make_admission(tmp_path: pathlib.Path, basis: str) -> promoter.PromotionConf
 		"source_fidelity": fidelity,
 		"table_figure": {"status": "PASS"},
 		"lifecycle": {
-			"mode": promoter.NEW_TITLE_NO_PREDECESSOR,
+			"mode": admission.NEW_TITLE_NO_PREDECESSOR,
 			"admission_status": "ACCEPTED",
 			"expected_absent_pending": str(tmp_path / "PENDING"),
 			"destination": str(tmp_path / "delivery" / "title.md"),
 		},
 	}
 	(stage / "admission_gate.json").write_text(json.dumps(manifest), encoding="utf-8")
-	return promoter.PromotionConfig.new_title(
+	return admission.PromotionConfig.new_title(
 		candidate,
 		pathlib.Path(manifest["lifecycle"]["destination"]),
 		pathlib.Path(manifest["lifecycle"]["expected_absent_pending"]),
@@ -72,7 +72,7 @@ def test_independent_review_admits_lossy_word_count_metrics_as_diagnostics(
 	})
 	manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
-	assert promoter.require_admission_gate(config) == manifest["candidate_sha256"]
+	assert admission.require_admission_gate(config) == manifest["candidate_sha256"]
 
 
 @pytest.mark.parametrize(
@@ -83,4 +83,4 @@ def test_numeric_accounting_cannot_admit_without_independent_review(
 	config = make_admission(tmp_path, basis)
 
 	with pytest.raises(ValueError, match="promotion requires independent source review"):
-		promoter.require_admission_gate(config)
+		admission.require_admission_gate(config)

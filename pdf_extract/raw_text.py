@@ -5,6 +5,8 @@ import pathlib
 import fitz
 
 import pdf_extract.cleanup
+import pdf_extract.models
+import pdf_extract.text
 
 
 # The archived PDF's omitted word gaps measure 0.15 em; require a clear 0.1-em gap.
@@ -62,7 +64,7 @@ def _join_line_spans(
 
 
 #============================================
-def extract_raw_text(input_path: pathlib.Path, pages: list[int] | None) -> list[pdf_extract.cleanup.PageResult]:
+def extract_raw_text(input_path: pathlib.Path, pages: list[int] | None) -> list[pdf_extract.models.PageResult]:
 	"""Extract each selected page from its PDF text layer without OCR.
 
 	Args:
@@ -70,11 +72,11 @@ def extract_raw_text(input_path: pathlib.Path, pages: list[int] | None) -> list[
 		pages: Zero-based page numbers, or None for every page.
 
 	Returns:
-		list[pdf_extract.cleanup.PageResult]: One page result per selected page.
+		list[pdf_extract.models.PageResult]: One page result per selected page.
 	"""
 	document = fitz.open(input_path)
 	page_numbers = pdf_extract.cleanup.get_page_numbers(document, pages)
-	results: list[pdf_extract.cleanup.PageResult] = []
+	results: list[pdf_extract.models.PageResult] = []
 	for page_number in page_numbers:
 		page = document[page_number]
 		page_data = page.get_text("rawdict", flags=fitz.TEXTFLAGS_TEXT)
@@ -89,8 +91,8 @@ def extract_raw_text(input_path: pathlib.Path, pages: list[int] | None) -> list[
 			if block_text.strip():
 				text_blocks.append(block_text)
 		page_text = "\n\n".join(text_blocks)
-		text = pdf_extract.cleanup.normalize_text(page_text)
+		text = pdf_extract.text.normalize_text(page_text)
 		embedded_words = len(page.get_text("words"))
-		results.append(pdf_extract.cleanup.PageResult(page_number, text, "raw_text", embedded_words, 0))
+		results.append(pdf_extract.models.PageResult(page_number, text, "raw_text", embedded_words, 0))
 	document.close()
 	return results

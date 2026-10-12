@@ -8,6 +8,8 @@
 - `audit/` - validation, auditing, archival, and canonical-promotion scripts.
 - `markdown_quality.py` - shared Markdown cleaning utilities.
 - `pdf_extract/` - PDF extraction helpers used by extractors.
+  `models.py` holds shared records; `page_cleanup.py` holds page-aware cleanup passes; `text.py`
+  handles normalization and page seams; `cleanup.py` coordinates conversion, scoring, and reports.
 - `tests/` - pytest suite.
 - `docs/` - project documentation.
 - `devel/` - repository maintenance and developer tooling.
@@ -21,6 +23,7 @@
 - `audit/validate_markdown_v2.py` - preferred structural validator.
 - `audit/validate_markdown_delivery.py` - delivery validator.
 - `audit/promote_validated_candidate.py` - explicit lifecycle, same-filesystem no-clobber promoter.
+- `audit/promotion_admission.py` - promotion configuration and source-bound validation gates.
 
 ## Documentation map
 

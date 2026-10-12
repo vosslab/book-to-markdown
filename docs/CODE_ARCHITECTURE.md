@@ -11,6 +11,10 @@ DjVu, and text into one page-free Markdown file per title. Scripts are grouped i
 - Extraction CLIs in `extract/`: raw-text PDF extraction, OCR PDF extraction, EPUB structure
   inspection, EPUB OCR, and the Pandoc semantic filter `semantic_markdown.lua`.
 - Shared libraries at the repository root: `markdown_quality.py` and the `pdf_extract/` package.
+  Within `pdf_extract/`, `models.py` owns page and conversion records, `page_cleanup.py` owns
+  page-aware running-head, page-number, picture-block, and numbered-heading cleanup, and `text.py`
+  owns text normalization and page-seam joining. `cleanup.py` coordinates conversion, scoring,
+  and reporting.
 - Cleaning and repair in `cleanup/`: `clean_markdown.py`, `wrap_malformed_tables.py`,
   `compare_markdown_candidates.py`, and `mathml_to_latex.py`.
   [layout.py](../cleanup/layout.py) owns protected Markdown spans, line boundaries, and prose reflow;
@@ -18,6 +22,9 @@ DjVu, and text into one page-free Markdown file per title. Scripts are grouped i
 - Validation and auditing in `audit/`: `validate_markdown_v2.py`,
   `validate_markdown_delivery.py`, `promote_validated_candidate.py`, duplication/residue audits,
   and source archival.
+  [promotion_admission.py](../audit/promotion_admission.py) owns lifecycle configuration,
+  source-review admission, content checks, and validator execution; the promoter owns filesystem
+  locks, snapshots, backups, and publication.
 
 ## Data flow
 

@@ -7,6 +7,7 @@ import pathlib
 
 import pdf_extract.cleanup
 import pdf_extract.ocr_text
+import pdf_extract.page_cleanup
 
 
 #============================================
@@ -52,7 +53,7 @@ def main() -> None:
 	input_path = pathlib.Path(args.pdf)
 	output_path = pathlib.Path(args.output_file)
 	pages = pdf_extract.cleanup.parse_pages(args.pages)
-	running_head_defaults = pdf_extract.cleanup.effective_running_head_defaults(args)
+	running_head_defaults = pdf_extract.page_cleanup.effective_running_head_defaults(args)
 	extracted_pages = pdf_extract.ocr_text.extract_ocr_text(input_path, pages)
 	if args.measure_only:
 		result = pdf_extract.cleanup.measure_pages(extracted_pages, "ocr", running_head_defaults)

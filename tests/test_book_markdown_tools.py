@@ -13,6 +13,7 @@ COMPARE = importlib.import_module("compare_markdown_candidates")
 VALIDATE = importlib.import_module("validate_markdown_delivery")
 VALIDATE_V2 = importlib.import_module("validate_markdown_v2")
 WRAP = importlib.import_module("wrap_malformed_tables")
+PDF_TEXT = importlib.import_module("pdf_extract.text")
 PDF_CLEANUP = importlib.import_module("pdf_extract.cleanup")
 EPUB_STRUCTURE = importlib.import_module("epub_structure")
 ARCHIVE_SOURCES = importlib.import_module("archive_processed_sources")
@@ -436,7 +437,7 @@ def test_pdf_frontmatter_establishes_canonical_h1(tmp_path: pathlib.Path) -> Non
 def test_pdf_source_h1_is_demoted_outside_code() -> None:
 	"""PDF section H1s become H2 while hash-prefixed code stays unchanged."""
 	text = "# Part One\n\n```sh\n# a comment\n```\n"
-	demoted = PDF_CLEANUP.demote_source_h1s(text)
+	demoted = PDF_TEXT.demote_source_h1s(text)
 	assert demoted.startswith("## Part One")
 	assert "\n# a comment\n" in demoted
 

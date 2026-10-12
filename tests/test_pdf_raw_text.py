@@ -5,7 +5,8 @@ import pathlib
 import fitz
 
 import cleanup.layout
-import pdf_extract.cleanup
+import pdf_extract.models
+import pdf_extract.page_cleanup
 import pdf_extract.raw_text
 
 
@@ -95,7 +96,7 @@ def test_running_heads_keep_unique_numbered_openers_and_remove_repeated_labels()
 		"APPENDIX 1",
 	]
 	pages = [
-		pdf_extract.cleanup.PageResult(
+		pdf_extract.models.PageResult(
 			page_number=index,
 			text=f"{label}\nUnique prose {chr(65 + index)}.",
 			source="raw_text",
@@ -110,9 +111,9 @@ def test_running_heads_keep_unique_numbered_openers_and_remove_repeated_labels()
 		"edge_fraction": 0.70,
 		"max_length": 90,
 	}
-	removals: list[pdf_extract.cleanup.Removal] = []
+	removals: list[pdf_extract.models.Removal] = []
 
-	decisions = pdf_extract.cleanup.remove_running_heads(pages, removals, defaults)
+	decisions = pdf_extract.page_cleanup.remove_running_heads(pages, removals, defaults)
 	remaining_labels = [
 		page.text.splitlines()[0]
 		for page in pages

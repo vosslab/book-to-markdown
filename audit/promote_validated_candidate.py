@@ -16,93 +16,12 @@ import hashlib
 import json
 import os
 import pathlib
-import re
-import subprocess
 import sys
 import tempfile
 from collections import abc
 from datetime import datetime
 
-
-NEW_TITLE_NO_PREDECESSOR = "NEW_TITLE_NO_PREDECESSOR"
-SUPERSEDES_PENDING = "SUPERSEDES_PENDING"
-DIRECT_CANONICAL_REPLACEMENT = "DIRECT_CANONICAL_REPLACEMENT"
-ValidatorRunner = abc.Callable[[pathlib.Path, pathlib.Path], int]
-
-
-@dataclasses.dataclass(frozen=True)
-class PromotionConfig:
-	"""Describe one explicit validated-candidate publication lifecycle."""
-	mode: str
-	candidate: pathlib.Path
-	destination: pathlib.Path
-	validator: pathlib.Path
-	expected_absent_pending: pathlib.Path
-	predecessor: pathlib.Path | None
-	superseded_root: pathlib.Path | None
-	expected_predecessor_sha256: str | None = None
-
-	@classmethod
-	def new_title(
-			cls,
-			candidate: pathlib.Path,
-			destination: pathlib.Path,
-			expected_absent_pending: pathlib.Path,
-			validator: pathlib.Path,
-			) -> "PromotionConfig":
-		"""Build the explicit no-predecessor lifecycle configuration."""
-		config = cls(
-			NEW_TITLE_NO_PREDECESSOR,
-			candidate,
-			destination,
-			validator,
-			expected_absent_pending,
-			None,
-			None,
-		)
-		return config
-
-	@classmethod
-	def supersedes_pending(
-			cls,
-			candidate: pathlib.Path,
-			destination: pathlib.Path,
-			predecessor: pathlib.Path,
-			superseded_root: pathlib.Path,
-			validator: pathlib.Path,
-			) -> "PromotionConfig":
-		"""Build the preserved legacy predecessor-replacement configuration."""
-		config = cls(
-			SUPERSEDES_PENDING,
-			candidate,
-			destination,
-			validator,
-			predecessor,
-			predecessor,
-			superseded_root,
-		)
-		return config
-
-	@classmethod
-	def replace_canonical(
-			cls,
-			candidate: pathlib.Path,
-			destination: pathlib.Path,
-			superseded_root: pathlib.Path,
-			validator: pathlib.Path,
-			expected_predecessor_sha256: str,
-			) -> "PromotionConfig":
-		"""Build a direct, hash-bound canonical replacement configuration."""
-		return cls(
-			DIRECT_CANONICAL_REPLACEMENT,
-			candidate,
-			destination,
-			validator,
-			destination,
-			destination,
-			superseded_root,
-			expected_predecessor_sha256,
-		)
+import audit.promotion_admission as admission
 
 
 @dataclasses.dataclass(frozen=True)
@@ -120,171 +39,6 @@ class PublicationSnapshot:
 	"""Pair admitted publication bytes with the staged candidate version read."""
 	snapshot: pathlib.Path
 	candidate_version: FileVersion
-
-
-#============================================
-def parse_config(arguments: list[str]) -> PromotionConfig:
-	"""Parse the two supported, unambiguous promoter invocations."""
-	if arguments and arguments[0] == "--new-title":
-		if len(arguments) != 5:
-			raise ValueError("usage: --new-title CANDIDATE DESTINATION EXPECTED_ABSENT_PENDING VALIDATOR")
-		candidate, destination, pending, validator = map(pathlib.Path, arguments[1:])
-		config = PromotionConfig.new_title(candidate, destination, pending, validator)
-		return config
-	if arguments and arguments[0] == "--replace-canonical":
-		if len(arguments) != 6:
-			raise ValueError(
-				"usage: --replace-canonical CANDIDATE DESTINATION SUPERSEDED_ROOT "
-				"EXPECTED_PREDECESSOR_SHA256 VALIDATOR"
-			)
-		candidate, destination, superseded_root = map(pathlib.Path, arguments[1:4])
-		expected_sha, validator = arguments[4:]
-		return PromotionConfig.replace_canonical(
-			candidate, destination, superseded_root, pathlib.Path(validator), expected_sha,
-		)
-	if len(arguments) != 5:
-		raise ValueError("usage: CANDIDATE DESTINATION PENDING SUPERSEDED_ROOT VALIDATOR")
-	candidate, destination, pending, superseded_root, validator = map(pathlib.Path, arguments)
-	config = PromotionConfig.supersedes_pending(
-		candidate, destination, pending, superseded_root, validator,
-	)
-	return config
-
-
-#============================================
-def sha256(path: pathlib.Path) -> str:
-	"""Return the complete SHA-256 digest for one regular file."""
-	digest = hashlib.sha256(path.read_bytes()).hexdigest()
-	return digest
-
-
-#============================================
-def require_clean_content(candidate: pathlib.Path) -> None:
-	"""Reject unresolved glyphs and replacement characters or entities."""
-	candidate_text = candidate.read_text(encoding="utf-8", errors="replace")
-	unresolved_markers = (
-		candidate_text.count("[unmapped-PDF-glyph-")
-		+ candidate_text.count("[unresolved source glyph]")
-	)
-	if unresolved_markers:
-		raise ValueError("unresolved source glyphs")
-	replacement_markers = candidate_text.count("\uFFFD") + len(re.findall(
-		r"&#(?:x0*FFFD|0*65533);",
-		candidate_text,
-		flags=re.I,
-	))
-	if replacement_markers:
-		raise ValueError("replacement characters or entities")
-
-
-#============================================
-def require_admission_gate(config: PromotionConfig) -> str:
-	"""Verify candidate-bound content gates and return its admitted SHA-256."""
-	manifest_path = config.candidate.parent / "admission_gate.json"
-	admission = json.loads(manifest_path.read_text(encoding="utf-8"))
-	candidate_sha = admission["candidate_sha256"]
-	if candidate_sha != sha256(config.candidate):
-		raise ValueError("admission manifest candidate hash mismatch")
-	fidelity = admission["source_fidelity"]
-	table_figure = admission["table_figure"]
-	if fidelity["status"] != "PASS" or table_figure["status"] != "PASS":
-		raise ValueError("source fidelity or table/figure gate not passed")
-	basis = fidelity["basis"]
-	if basis == "independent_source_review":
-		source = admission["source_path"]
-		source_sha = admission["source_sha256"]
-		source_path = pathlib.Path(source)
-		if sha256(source_path) != source_sha:
-			raise ValueError("admission source hash mismatch")
-		review_path = pathlib.Path(fidelity["review_receipt_path"])
-		if not review_path.is_absolute():
-			review_path = config.candidate.parent / review_path
-		review = json.loads(review_path.read_text(encoding="utf-8"))
-		if review.get("decision") != "ACCEPT":
-			raise ValueError("independent source review is not accepted")
-		review_candidate = review.get("candidate", {})
-		review_source = review.get("source", {})
-		if review_candidate.get("sha256") != candidate_sha:
-			raise ValueError("independent review candidate hash mismatch")
-		if review_source.get("sha256") != source_sha:
-			raise ValueError("independent review source hash mismatch")
-		if config.mode == DIRECT_CANONICAL_REPLACEMENT:
-			candidate_label_value = review_candidate.get("path")
-			if not isinstance(candidate_label_value, str) or not candidate_label_value:
-				raise ValueError("independent review candidate path is missing")
-			candidate_label = pathlib.Path(candidate_label_value)
-			if not candidate_label.is_absolute():
-				raise ValueError("independent review candidate path must be absolute")
-			if candidate_label.resolve() != config.candidate.resolve():
-				raise ValueError("independent review candidate path mismatch")
-			source_label_value = review_source.get("path")
-			if not isinstance(source_label_value, str) or not source_label_value:
-				raise ValueError("independent review source path is missing")
-			source_label = pathlib.Path(source_label_value)
-			if not source_label.is_absolute():
-				raise ValueError("independent review source path must be absolute")
-			if source_label.resolve() != source_path.resolve():
-				raise ValueError("independent review source path mismatch")
-		if not review.get("reviewer") or not review.get("scope_checked"):
-			raise ValueError("independent review receipt lacks reviewer or scope")
-	else:
-		raise ValueError("promotion requires independent source review")
-	lifecycle = admission.get("lifecycle")
-	if config.mode == NEW_TITLE_NO_PREDECESSOR:
-		if not isinstance(lifecycle, dict):
-			raise ValueError("new title requires a lifecycle declaration")
-		if lifecycle["mode"] != NEW_TITLE_NO_PREDECESSOR:
-			raise ValueError("new-title mode conflicts with admission lifecycle")
-		if "admission_status" not in lifecycle or lifecycle["admission_status"] != "ACCEPTED":
-			raise ValueError("new-title admission status is not accepted")
-		if lifecycle["expected_absent_pending"] != str(config.expected_absent_pending):
-			raise ValueError("admission expected pending path does not match invocation")
-		if lifecycle["destination"] != str(config.destination):
-			raise ValueError("admission destination does not match invocation")
-	elif lifecycle is not None and lifecycle["mode"] != SUPERSEDES_PENDING:
-		if config.mode != DIRECT_CANONICAL_REPLACEMENT or lifecycle["mode"] != DIRECT_CANONICAL_REPLACEMENT:
-			raise ValueError("replacement conflicts with admission lifecycle")
-	if config.mode == DIRECT_CANONICAL_REPLACEMENT:
-		if not isinstance(lifecycle, dict) or lifecycle.get("mode") != DIRECT_CANONICAL_REPLACEMENT:
-			raise ValueError("direct replacement requires a lifecycle declaration")
-		if lifecycle.get("destination") != str(config.destination):
-			raise ValueError("admission destination does not match invocation")
-		if lifecycle.get("expected_predecessor_sha256") != config.expected_predecessor_sha256:
-			raise ValueError("admission predecessor hash does not match invocation")
-		if fidelity["basis"] != "independent_source_review":
-			raise ValueError("direct replacement requires independent source review")
-		review_path = pathlib.Path(fidelity["review_receipt_path"])
-		if not review_path.is_absolute():
-			review_path = config.candidate.parent / review_path
-		review = json.loads(review_path.read_text(encoding="utf-8"))
-		predecessor = review.get("predecessor", {})
-		if review.get("destination") != str(config.destination):
-			raise ValueError("independent review destination mismatch")
-		if predecessor.get("sha256") != config.expected_predecessor_sha256:
-			raise ValueError("independent review predecessor hash mismatch")
-		if predecessor.get("path") != str(config.destination):
-			raise ValueError("independent review predecessor path mismatch")
-	return candidate_sha
-
-
-#============================================
-def default_validator_runner(validator: pathlib.Path, candidate: pathlib.Path) -> int:
-	"""Run one validator through the current Python interpreter."""
-	result = subprocess.run([sys.executable, str(validator), str(candidate)], check=False)
-	returncode = result.returncode
-	return returncode
-
-
-#============================================
-def require_validators(config: PromotionConfig, validator_runner: ValidatorRunner) -> None:
-	"""Require the supplied delivery validator and repository v2 validator."""
-	mandatory_validator = pathlib.Path(__file__).with_name("validate_markdown_v2.py")
-	validators = [config.validator]
-	if config.validator != mandatory_validator:
-		validators.append(mandatory_validator)
-	for validator in validators:
-		if validator_runner(validator, config.candidate) != 0:
-			raise ValueError(f"validator failed: {validator}")
 
 
 #============================================
@@ -337,32 +91,24 @@ def require_same_filesystem(source: pathlib.Path, destination_parent: pathlib.Pa
 
 
 #============================================
-def require_bound_admission(config: PromotionConfig, admitted_sha: str) -> None:
-	"""Recheck the validator-bound admission SHA under the publication lock."""
-	current_sha = require_admission_gate(config)
-	if current_sha != admitted_sha:
-		raise ValueError("admission manifest changed after validation")
-
-
-#============================================
-def transition_admission_status(config: PromotionConfig, status: str) -> None:
+def transition_admission_status(config: admission.PromotionConfig, status: str) -> None:
 	"""Change a new-title admission status under its title lifecycle reservation."""
-	if config.mode != NEW_TITLE_NO_PREDECESSOR:
+	if config.mode != admission.NEW_TITLE_NO_PREDECESSOR:
 		raise ValueError("only new-title admission status may transition")
 	manifest_path = config.candidate.parent / "admission_gate.json"
 	with pending_lifecycle_reservation(config.expected_absent_pending):
-		admission = json.loads(manifest_path.read_text(encoding="utf-8"))
-		lifecycle = admission["lifecycle"]
-		if lifecycle["mode"] != NEW_TITLE_NO_PREDECESSOR:
+		manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+		lifecycle = manifest["lifecycle"]
+		if lifecycle["mode"] != admission.NEW_TITLE_NO_PREDECESSOR:
 			raise ValueError("new-title mode conflicts with admission lifecycle")
 		lifecycle["admission_status"] = status
-		manifest_path.write_text(json.dumps(admission), encoding="ascii")
+		manifest_path.write_text(json.dumps(manifest), encoding="ascii")
 		fsync_file(manifest_path)
 		fsync_directory(manifest_path.parent)
 
 
 #============================================
-def subject_superseded_path(config: PromotionConfig) -> pathlib.Path:
+def subject_superseded_path(config: admission.PromotionConfig) -> pathlib.Path:
 	"""Return the legacy subject-scoped predecessor backup destination."""
 	if config.predecessor is None or config.superseded_root is None:
 		raise ValueError("legacy replacement requires predecessor and superseded root")
@@ -511,7 +257,7 @@ def create_admitted_snapshot(
 	snapshot_descriptor = None
 	if snapshot is None:
 		raise RuntimeError("snapshot creation returned no path")
-	if sha256(snapshot) != admitted_sha:
+	if admission.sha256(snapshot) != admitted_sha:
 		remove_snapshot(snapshot)
 		raise ValueError("candidate changed before immutable publication snapshot")
 	publication_snapshot = PublicationSnapshot(snapshot, candidate_version)
@@ -552,7 +298,7 @@ def remove_snapshot(snapshot: pathlib.Path) -> None:
 
 
 #============================================
-def require_new_title_publication_preconditions(config: PromotionConfig) -> None:
+def require_new_title_publication_preconditions(config: admission.PromotionConfig) -> None:
 	"""Require final new-title lifecycle absence before canonical linking."""
 	if config.expected_absent_pending.exists():
 		raise ValueError("expected absent pending path exists")
@@ -562,7 +308,7 @@ def require_new_title_publication_preconditions(config: PromotionConfig) -> None
 
 #============================================
 def require_replacement_publication_preconditions(
-		config: PromotionConfig, superseded: pathlib.Path) -> None:
+		config: admission.PromotionConfig, superseded: pathlib.Path) -> None:
 	"""Require final replacement lifecycle sources and destinations under the title lock."""
 	if config.predecessor is None or not config.predecessor.is_file():
 		raise ValueError("pending predecessor artifact must exist")
@@ -609,7 +355,7 @@ def copy_predecessor_backup(
 			if source_descriptor is not None:
 				os.close(source_descriptor)
 			os.close(backup_descriptor)
-		if sha256(backup) != expected_sha:
+		if admission.sha256(backup) != expected_sha:
 			raise OSError("superseded backup readback hash mismatch")
 		fsync_directory(backup.parent)
 	except (OSError, ValueError) as error:
@@ -649,7 +395,7 @@ def require_verified_predecessor_backup(
 	"""Require the retained backup to keep its copied identity and exact bytes."""
 	if file_version(os.lstat(backup)) != expected_version:
 		raise ValueError(f"replacement backup changed; inspect {backup}")
-	if sha256(backup) != expected_sha:
+	if admission.sha256(backup) != expected_sha:
 		raise ValueError(f"replacement backup hash changed; inspect {backup}")
 	if file_version(os.lstat(backup)) != expected_version:
 		raise ValueError(f"replacement backup changed during verification; inspect {backup}")
@@ -657,7 +403,7 @@ def require_verified_predecessor_backup(
 
 #============================================
 def publish_direct_replacement(
-		config: PromotionConfig, admitted_sha: str, predecessor_version: FileVersion,
+		config: admission.PromotionConfig, admitted_sha: str, predecessor_version: FileVersion,
 		) -> tuple[pathlib.Path, dict[str, str] | None]:
 	"""Back up and atomically replace the exact admitted canonical predecessor."""
 	if config.expected_predecessor_sha256 is None:
@@ -668,9 +414,9 @@ def publish_direct_replacement(
 		current = file_version(os.lstat(config.destination))
 		if current != predecessor_version:
 			raise ValueError("canonical predecessor inode changed after admission")
-		if sha256(config.destination) != config.expected_predecessor_sha256:
+		if admission.sha256(config.destination) != config.expected_predecessor_sha256:
 			raise ValueError("canonical predecessor hash changed after admission")
-		require_bound_admission(config, admitted_sha)
+		admission.require_bound_admission(config, admitted_sha)
 		publication_snapshot = create_admitted_snapshot(
 			config.candidate, config.destination.parent, admitted_sha,
 		)
@@ -680,7 +426,7 @@ def publish_direct_replacement(
 		try:
 			if file_version(os.lstat(config.destination)) != predecessor_version:
 				raise ValueError("canonical predecessor inode changed before replacement")
-			if sha256(config.destination) != config.expected_predecessor_sha256:
+			if admission.sha256(config.destination) != config.expected_predecessor_sha256:
 				raise ValueError("canonical predecessor hash changed before replacement")
 			if backup.exists():
 				raise FileExistsError(f"superseded destination already exists: {backup}")
@@ -691,7 +437,7 @@ def publish_direct_replacement(
 			backup_version = file_version(os.lstat(backup))
 			if file_version(os.lstat(config.destination)) != predecessor_version:
 				raise ValueError("canonical predecessor inode changed before atomic replacement")
-			if sha256(config.destination) != config.expected_predecessor_sha256:
+			if admission.sha256(config.destination) != config.expected_predecessor_sha256:
 				raise ValueError("canonical predecessor hash changed before atomic replacement")
 			checking_backup = True
 			require_verified_predecessor_backup(
@@ -742,7 +488,7 @@ def publish_direct_replacement(
 def verify_canonical_commit(destination: pathlib.Path, admitted_sha: str) -> None:
 	"""Read back and durably acknowledge the irreversible canonical publication."""
 	fsync_file(destination)
-	if sha256(destination) != admitted_sha:
+	if admission.sha256(destination) != admitted_sha:
 		raise OSError("published canonical hash differs from admitted candidate")
 	fsync_file(destination)
 	fsync_directory(destination.parent)
@@ -765,19 +511,19 @@ def cleanup_recovery_evidence(
 
 #============================================
 def publish_new_title(
-		config: PromotionConfig, admitted_sha: str) -> tuple[pathlib.Path | None, dict[str, str] | None]:
+		config: admission.PromotionConfig, admitted_sha: str) -> tuple[pathlib.Path | None, dict[str, str] | None]:
 	"""Link-publish one new canonical without a fabricated predecessor artifact."""
 	require_same_filesystem(config.candidate, config.destination.parent)
 	with pending_lifecycle_reservation(config.expected_absent_pending):
 		with promotion_lock(config.destination):
-			require_bound_admission(config, admitted_sha)
+			admission.require_bound_admission(config, admitted_sha)
 			publication_snapshot = create_admitted_snapshot(
 				config.candidate, config.destination.parent, admitted_sha,
 			)
 			canonical_created = False
 			try:
 				require_new_title_publication_preconditions(config)
-				require_bound_admission(config, admitted_sha)
+				admission.require_bound_admission(config, admitted_sha)
 				os.link(publication_snapshot.snapshot, config.destination)
 				canonical_created = True
 				if config.expected_absent_pending.exists():
@@ -801,7 +547,7 @@ def publish_new_title(
 
 #============================================
 def publish_replacement(
-		config: PromotionConfig, admitted_sha: str) -> tuple[pathlib.Path, dict[str, str] | None]:
+		config: admission.PromotionConfig, admitted_sha: str) -> tuple[pathlib.Path, dict[str, str] | None]:
 	"""Link-publish canonical before performing recoverable legacy cleanup."""
 	if config.predecessor is None:
 		raise ValueError("legacy replacement requires a predecessor")
@@ -811,14 +557,14 @@ def publish_replacement(
 	with pending_lifecycle_reservation(config.predecessor):
 		with promotion_lock(config.destination):
 			superseded.parent.mkdir(parents=True, exist_ok=True)
-			require_bound_admission(config, admitted_sha)
+			admission.require_bound_admission(config, admitted_sha)
 			publication_snapshot = create_admitted_snapshot(
 				config.candidate, config.destination.parent, admitted_sha,
 			)
 			canonical_created = False
 			try:
 				require_replacement_publication_preconditions(config, superseded)
-				require_bound_admission(config, admitted_sha)
+				admission.require_bound_admission(config, admitted_sha)
 				os.link(publication_snapshot.snapshot, config.destination)
 				canonical_created = True
 				verify_canonical_commit(config.destination, admitted_sha)
@@ -856,31 +602,31 @@ def publish_replacement(
 
 #============================================
 def promote(
-		config: PromotionConfig,
-		validator_runner: ValidatorRunner = default_validator_runner,
+		config: admission.PromotionConfig,
+		validator_runner: admission.ValidatorRunner = admission.default_validator_runner,
 		) -> dict[str, object]:
 	"""Validate and atomically publish one configured candidate lifecycle."""
 	if not config.candidate.is_file():
 		raise ValueError("candidate artifact must exist")
 	predecessor_version: FileVersion | None = None
-	if config.mode == SUPERSEDES_PENDING:
+	if config.mode == admission.SUPERSEDES_PENDING:
 		if config.predecessor is None or not config.predecessor.is_file():
 			raise ValueError("pending predecessor artifact must exist")
-	elif config.mode == DIRECT_CANONICAL_REPLACEMENT:
+	elif config.mode == admission.DIRECT_CANONICAL_REPLACEMENT:
 		if not config.destination.is_file() or config.expected_predecessor_sha256 is None:
 			raise ValueError("direct replacement requires an existing canonical predecessor")
 		predecessor_version = file_version(os.lstat(config.destination))
-		if sha256(config.destination) != config.expected_predecessor_sha256:
+		if admission.sha256(config.destination) != config.expected_predecessor_sha256:
 			raise ValueError("canonical predecessor hash does not match admission")
-	elif config.mode != NEW_TITLE_NO_PREDECESSOR:
+	elif config.mode != admission.NEW_TITLE_NO_PREDECESSOR:
 		raise ValueError(f"unsupported lifecycle mode: {config.mode}")
-	require_clean_content(config.candidate)
-	require_admission_gate(config)
-	require_validators(config, validator_runner)
-	admitted_sha = require_admission_gate(config)
-	if config.mode == NEW_TITLE_NO_PREDECESSOR:
+	admission.require_clean_content(config.candidate)
+	admission.require_admission_gate(config)
+	admission.require_validators(config, validator_runner)
+	admitted_sha = admission.require_admission_gate(config)
+	if config.mode == admission.NEW_TITLE_NO_PREDECESSOR:
 		superseded, cleanup = publish_new_title(config, admitted_sha)
-	elif config.mode == DIRECT_CANONICAL_REPLACEMENT:
+	elif config.mode == admission.DIRECT_CANONICAL_REPLACEMENT:
 		if predecessor_version is None:
 			raise RuntimeError("predecessor version was not captured")
 		superseded, cleanup = publish_direct_replacement(config, admitted_sha, predecessor_version)
@@ -897,11 +643,11 @@ def promote(
 		"predecessor_sha256": config.expected_predecessor_sha256,
 		"replacement_status": (
 			"RECOVERY_REQUIRED" if cleanup is not None and
-			config.mode == DIRECT_CANONICAL_REPLACEMENT else
-			("REPLACED" if config.mode == DIRECT_CANONICAL_REPLACEMENT else None)
+			config.mode == admission.DIRECT_CANONICAL_REPLACEMENT else
+			("REPLACED" if config.mode == admission.DIRECT_CANONICAL_REPLACEMENT else None)
 		),
 		"superseded_sha256": (
-			sha256(superseded) if superseded is not None and superseded.is_file() else None
+			admission.sha256(superseded) if superseded is not None and superseded.is_file() else None
 		),
 	}
 	return result
@@ -910,7 +656,7 @@ def promote(
 #============================================
 def main() -> None:
 	"""Adapt command-line arguments to the explicit promoter configuration."""
-	config = parse_config(sys.argv[1:])
+	config = admission.parse_config(sys.argv[1:])
 	result = promote(config)
 	print(json.dumps(result))
 

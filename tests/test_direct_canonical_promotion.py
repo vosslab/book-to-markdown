@@ -11,10 +11,11 @@ import pytest
 
 # Local
 import promote_validated_candidate as promoter
+import audit.promotion_admission as admission
 
 
 def make_replacement(tmp_path: pathlib.Path) -> tuple[
-		promoter.PromotionConfig, pathlib.Path, pathlib.Path, pathlib.Path, bytes, bytes]:
+		admission.PromotionConfig, pathlib.Path, pathlib.Path, pathlib.Path, bytes, bytes]:
 	"""Create a valid isolated admission for the real direct replacement path."""
 	stage = tmp_path / "stage"
 	destination = tmp_path / "SORTED_SUBJECTS_MD" / "biology" / "sample.md"
@@ -54,20 +55,20 @@ def make_replacement(tmp_path: pathlib.Path) -> tuple[
 		},
 		"table_figure": {"status": "PASS"},
 		"lifecycle": {
-			"mode": promoter.DIRECT_CANONICAL_REPLACEMENT,
+			"mode": admission.DIRECT_CANONICAL_REPLACEMENT,
 			"destination": str(destination),
 			"expected_predecessor_sha256": old_sha,
 		},
 	}
 	manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-	config = promoter.PromotionConfig.replace_canonical(
+	config = admission.PromotionConfig.replace_canonical(
 		candidate, destination, backup_root, tmp_path / "validator.py", old_sha,
 	)
 	backup = promoter.subject_superseded_path(config)
 	return config, candidate, destination, backup, old_bytes, candidate_bytes
 
 
-def run_real_promoter(config: promoter.PromotionConfig) -> dict[str, object]:
+def run_real_promoter(config: admission.PromotionConfig) -> dict[str, object]:
 	"""Skip only external validator processes while executing real promotion code."""
 	def validators_pass(validator: pathlib.Path, candidate: pathlib.Path) -> int:
 		return 0
@@ -174,7 +175,7 @@ def test_precommit_backup_failure_preserves_canonical_and_cleans_owned_partial_b
 			raise OSError("injected backup write failure")
 		return original_write(descriptor, content)
 
-	original_sha256 = promoter.sha256
+	original_sha256 = admission.sha256
 
 	def fail_backup_readback(path: pathlib.Path) -> str:
 		if failure == "backup_readback" and path == backup and path.exists():
@@ -184,7 +185,7 @@ def test_precommit_backup_failure_preserves_canonical_and_cleans_owned_partial_b
 
 	monkeypatch.setattr(promoter.os, "open", track_backup_open)
 	monkeypatch.setattr(promoter.os, "write", fail_backup_write)
-	monkeypatch.setattr(promoter, "sha256", fail_backup_readback)
+	monkeypatch.setattr(admission, "sha256", fail_backup_readback)
 
 	with pytest.raises(OSError):
 		run_real_promoter(config)
@@ -241,7 +242,7 @@ def test_postcommit_failure_reports_committed_state_and_retains_recovery_evidenc
 		) -> None:
 	config, candidate, destination, backup, old_bytes, candidate_bytes = make_replacement(tmp_path)
 	original_fsync_file = promoter.fsync_file
-	original_sha256 = promoter.sha256
+	original_sha256 = admission.sha256
 
 	def fail_commit_fsync(path: pathlib.Path) -> None:
 		if failure == "canonical_fsync" and path == destination:
@@ -255,7 +256,7 @@ def test_postcommit_failure_reports_committed_state_and_retains_recovery_evidenc
 		return original_sha256(path)
 
 	monkeypatch.setattr(promoter, "fsync_file", fail_commit_fsync)
-	monkeypatch.setattr(promoter, "sha256", fail_commit_readback)
+	monkeypatch.setattr(admission, "sha256", fail_commit_readback)
 
 	result = run_real_promoter(config)
 

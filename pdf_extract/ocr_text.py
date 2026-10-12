@@ -4,6 +4,8 @@ import pathlib
 import fitz
 
 import pdf_extract.cleanup
+import pdf_extract.models
+import pdf_extract.text
 
 #============================================
 def extract_ocr_page(page: fitz.Page) -> str:
@@ -21,12 +23,12 @@ def extract_ocr_page(page: fitz.Page) -> str:
 			) from error
 		raise
 	text = page.get_text("text", textpage=textpage)
-	clean_text = pdf_extract.cleanup.normalize_text(text)
+	clean_text = pdf_extract.text.normalize_text(text)
 	return clean_text
 
 
 #============================================
-def extract_ocr_text(input_path: pathlib.Path, pages: list[int] | None) -> list[pdf_extract.cleanup.PageResult]:
+def extract_ocr_text(input_path: pathlib.Path, pages: list[int] | None) -> list[pdf_extract.models.PageResult]:
 	"""Extract each selected page via OCR for image-only scans.
 
 	Args:
@@ -34,7 +36,7 @@ def extract_ocr_text(input_path: pathlib.Path, pages: list[int] | None) -> list[
 		pages: Zero-based page numbers, or None for every page.
 
 	Returns:
-		list[pdf_extract.cleanup.PageResult]: One OCR page result per selected page.
+		list[pdf_extract.models.PageResult]: One OCR page result per selected page.
 	"""
 	document = fitz.open(input_path)
 	try:
@@ -43,13 +45,13 @@ def extract_ocr_text(input_path: pathlib.Path, pages: list[int] | None) -> list[
 		embedded_word_counts = [
 			len(document[page_number].get_text("words")) for page_number in page_numbers
 		]
-		results: list[pdf_extract.cleanup.PageResult] = []
+		results: list[pdf_extract.models.PageResult] = []
 		for page_number, embedded_words in zip(page_numbers, embedded_word_counts):
 			page = document[page_number]
 			text = extract_ocr_page(page)
 			ocr_words = pdf_extract.cleanup.count_words(text)
 			results.append(
-				pdf_extract.cleanup.PageResult(
+				pdf_extract.models.PageResult(
 					page_number, text, "ocr", embedded_words, ocr_words
 				)
 			)
