@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## 2026-10-22
+
+### Fixes and Maintenance
+
+- Exclude `INDEX.md` and `README.md` catalogs, case-insensitively, when delivery validation
+  scans a directory for books. Explicit file inputs remain eligible for validation.
+
 ## 2026-10-11
 
 ### Additions and New Features

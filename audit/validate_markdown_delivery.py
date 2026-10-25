@@ -173,9 +173,12 @@ def duplicate_title_issues(
 
 #============================================
 def delivery_paths(input_path: pathlib.Path) -> list[pathlib.Path]:
-	"""Resolve one file or the top-level Markdown files in one delivery directory."""
+	"""Resolve book files, excluding subject-folder catalog scaffolding."""
 	if input_path.is_dir():
-		paths = sorted(path for path in input_path.glob("*.md") if path.is_file())
+		paths = sorted(
+			path for path in input_path.glob("*.md")
+			if path.is_file() and path.name.lower() not in {"index.md", "readme.md"}
+		)
 	else:
 		paths = [input_path]
 	return paths
