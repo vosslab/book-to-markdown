@@ -80,19 +80,49 @@ def extract_raw_text(input_path: pathlib.Path, pages: list[int] | None) -> list[
 	for page_number in page_numbers:
 		page = document[page_number]
 		page_data = page.get_text("rawdict", flags=pymupdf.TEXTFLAGS_TEXT)
-		text_blocks: list[str] = []
+		line_records: list[pdf_extract.models.PageLineProvenance] = []
+		block_index = 0
 		for block in page_data["blocks"]:
 			if block["type"] != 0:
 				continue
-			lines: list[str] = []
+			block_records: list[pdf_extract.models.PageLineProvenance] = []
 			for line in block["lines"]:
-				lines.append(_join_line_spans(line["spans"]))
-			block_text = "\n".join(lines)
-			if block_text.strip():
-				text_blocks.append(block_text)
-		page_text = "\n\n".join(text_blocks)
-		text = pdf_extract.text.normalize_text(page_text)
+				spans = line["spans"]
+				line_text = _join_line_spans(spans)
+				if not line_text or not line_text.strip(" "):
+					continue
+				boxes = [span["bbox"] for span in spans if span.get("bbox")]
+				box = pymupdf.Rect(boxes[0]) if boxes else None
+				for span_box in boxes[1:]:
+					box.include_rect(span_box)
+				page_box = page.rect
+				rotated_box = box * page.rotation_matrix if box is not None else None
+				bbox = None
+				if rotated_box is not None and page_box.width and page_box.height:
+					bbox = (
+						(rotated_box.x0 - page_box.x0) / page_box.width,
+						(rotated_box.y0 - page_box.y0) / page_box.height,
+						(rotated_box.x1 - page_box.x0) / page_box.width,
+						(rotated_box.y1 - page_box.y0) / page_box.height,
+					)
+				block_records.append(pdf_extract.models.PageLineProvenance(
+					text=line_text,
+					line_id=len(line_records) + (1 if line_records else 0) + len(block_records),
+					source="raw_text",
+					block_index=block_index,
+					bbox=bbox,
+					font_size=max((span["size"] for span in spans), default=None),
+					font_names=tuple(dict.fromkeys(span["font"] for span in spans)),
+					font_flags=tuple(dict.fromkeys(span["flags"] for span in spans)),
+				))
+			if block_records:
+				if line_records:
+					line_records.append(pdf_extract.models.PageLineProvenance("", len(line_records), "raw_text"))
+				line_records.extend(block_records)
+				block_index += 1
+		text, line_records = pdf_extract.models.normalize_line_provenance(line_records)
 		embedded_words = len(page.get_text("words"))
-		results.append(pdf_extract.models.PageResult(page_number, text, "raw_text", embedded_words, 0))
+		result = pdf_extract.models.PageResult(page_number, text, "raw_text", embedded_words, 0, line_records)
+		results.append(result)
 	document.close()
 	return results

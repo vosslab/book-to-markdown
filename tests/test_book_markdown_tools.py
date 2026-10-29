@@ -231,6 +231,13 @@ def test_v2_delivery_validator_rejects_nonprinting_controls_but_allows_whitespac
 	assert not VALIDATE_V2.validate_text(path, clean_text)
 
 
+def test_generic_text_normalization_keeps_ordinary_crlf_boundary() -> None:
+	"""Ordinary text input still normalizes CRLF while PDF page text keeps source CR."""
+	text = "First line\r\nSecond line\r\n"
+	assert PDF_TEXT.normalize_text(text) == "First line\nSecond line"
+	assert PDF_TEXT.normalize_page_text(text) == "First line\r\nSecond line\r"
+
+
 def test_v2_validator_accepts_scientific_fences_and_fenced_prose() -> None:
 	"""Fence prevalence and payload type belong to source-aware review, not generic validation."""
 	path = pathlib.Path("biology/Example_Biology-2026.md")
@@ -372,11 +379,12 @@ def test_pdf_frontmatter_establishes_canonical_h1(tmp_path: pathlib.Path) -> Non
 
 
 def test_pdf_source_h1_is_demoted_outside_code() -> None:
-	"""PDF section H1s become H2 while hash-prefixed code stays unchanged."""
-	text = "# Part One\n\n```sh\n# a comment\n```\n"
+	"""PDF section H1s demote while code and embedded line glyphs stay unchanged."""
+	text = "# Part One\n\n```sh\n# a comment\n```\nBody\vtext\fcontinues.\n"
 	demoted = PDF_TEXT.demote_source_h1s(text)
 	assert demoted.startswith("## Part One")
 	assert "\n# a comment\n" in demoted
+	assert "Body\vtext\fcontinues." in demoted
 
 
 def test_epub_xml_parser_rejects_doctype() -> None:

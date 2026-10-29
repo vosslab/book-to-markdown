@@ -3,13 +3,16 @@
 # Standard Library
 import hashlib
 import json
+import os
 import pathlib
+import stat
 
 # Third-Party
 import pytest
 
 # Local
 import audit.promotion_admission as admission
+import promote_validated_candidate as promoter
 
 
 def make_admission(tmp_path: pathlib.Path, basis: str) -> admission.PromotionConfig:
@@ -84,3 +87,60 @@ def test_numeric_accounting_cannot_admit_without_independent_review(
 
 	with pytest.raises(ValueError, match="promotion requires independent source review"):
 		admission.require_admission_gate(config)
+
+
+def test_new_title_rejects_initial_dangling_pending_symlink_without_mutation(
+		tmp_path: pathlib.Path) -> None:
+	config = make_admission(tmp_path, "independent_source_review")
+	candidate_sha = hashlib.sha256(config.candidate.read_bytes()).hexdigest()
+	pending_target = tmp_path / "missing-pending-target"
+	config.expected_absent_pending.symlink_to(pending_target)
+
+	with pytest.raises(ValueError, match="expected absent pending path exists"):
+		promoter.promote(config, lambda validator, candidate: 0)
+
+	assert not config.destination.exists()
+	assert stat.S_ISLNK(os.lstat(config.expected_absent_pending).st_mode)
+	assert os.readlink(config.expected_absent_pending) == str(pending_target)
+	assert hashlib.sha256(config.candidate.read_bytes()).hexdigest() == candidate_sha
+
+
+def test_new_title_rolls_back_owned_canonical_when_pending_symlink_appears_after_link(
+		tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+	config = make_admission(tmp_path, "independent_source_review")
+	candidate_sha = hashlib.sha256(config.candidate.read_bytes()).hexdigest()
+	original_link = promoter.os.link
+	pending_target = tmp_path / "missing-pending-target"
+	foreign_canonical = b"foreign canonical replacement\n"
+
+	def replace_canonical_then_create_pending(
+			source: pathlib.Path, destination: pathlib.Path) -> None:
+		original_link(source, destination)
+		destination.unlink()
+		destination.write_bytes(foreign_canonical)
+		config.expected_absent_pending.symlink_to(pending_target)
+
+	monkeypatch.setattr(promoter.os, "link", replace_canonical_then_create_pending)
+
+	with pytest.raises(ValueError, match="expected absent pending path exists"):
+		promoter.promote(config, lambda validator, candidate: 0)
+
+	assert config.destination.read_bytes() == foreign_canonical
+	assert stat.S_ISLNK(os.lstat(config.expected_absent_pending).st_mode)
+	assert os.readlink(config.expected_absent_pending) == str(pending_target)
+	assert hashlib.sha256(config.candidate.read_bytes()).hexdigest() == candidate_sha
+
+
+def test_new_title_with_absent_pending_path_publishes_and_retains_candidate(
+		tmp_path: pathlib.Path) -> None:
+	config = make_admission(tmp_path, "independent_source_review")
+	candidate_bytes = config.candidate.read_bytes()
+	pending_path = config.expected_absent_pending
+
+	result = promoter.promote(config, lambda validator, candidate: 0)
+
+	assert config.destination.read_bytes() == candidate_bytes
+	assert config.candidate.read_bytes() == candidate_bytes
+	assert not os.path.lexists(pending_path)
+	assert result["lifecycle_mode"] == admission.NEW_TITLE_NO_PREDECESSOR
+	assert result["superseded"] is None

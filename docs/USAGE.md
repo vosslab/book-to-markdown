@@ -41,8 +41,38 @@ python3 extract/azw3_to_markdown.py book.azw3 -o /tmp/book.raw.md
   delivery directory and writes machine-readable results.
 
 Use `--help` on a command for its full options. PDF extractors accept `--pages` for a zero-based
-page subset. OCR extractors also accept the `--skip-running-heads`, `--skip-page-numbers`,
-`--skip-seams`, and `--skip-heading-synthesis` controls.
+page subset. PDF extractors also accept `--skip-running-heads`, `--skip-page-numbers`, and
+`--skip-seams`; OCR extraction additionally accepts `--skip-heading-synthesis`.
+
+PDF running-head cleanup uses positioned source-line evidence during extraction. Repeated edge text
+is only a candidate; lines with missing or ambiguous evidence are preserved. The per-occurrence JSON
+report records the evidence and disposition. Use `--skip-running-heads` to compare extraction with
+this cleanup disabled.
+
+This source-aware PDF step is separate from `cleanup/clean_markdown.py`, which normalizes extracted
+content (including ASCII cleanup) after extraction. The Markdown cleaner does not have PDF page
+geometry or source-line provenance and cannot make equivalent header decisions.
+
+## Inspect a PDF region
+
+`tools/pdf_region_text.py` is an optional aid for inspecting word placement near a table, column,
+or panel boundary. It writes a JSON report for one PDF page and rectangle into an existing stage
+directory. Contained words and words crossing the rectangle boundary are listed separately. The
+report records source identity, page geometry, word identifiers, and extractor order; it does not
+group semantic rows or replace rendered-page review.
+
+```bash
+source source_me.sh
+python3 tools/pdf_region_text.py \
+  --source /path/to/source.pdf --page 4 \
+  --rectangle 300 100 540 650 \
+  --stage /path/to/existing-stage \
+  --output page4_column2.json
+```
+
+Use a regular PDF and an existing visible stage directory. The output is created as a new visible
+JSON file and is never overwritten; a failed write removes only the partial file created by that
+invocation.
 
 ## Inputs and outputs
 

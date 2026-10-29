@@ -213,7 +213,7 @@ def result_report(input_path: pathlib.Path, output_path: pathlib.Path, result: p
 	"""Build a JSON-compatible report used for stdout and optional machine comparison."""
 	running_heads = [dataclasses.asdict(decision) for decision in result.running_heads]
 	removal_counts = collections.Counter(removal.pass_name for removal in result.removals)
-	removal_samples: dict[str, list[dict[str, int | str]]] = {}
+	removal_samples: dict[str, list[dict[str, int | float | str | list[float] | None]]] = {}
 	for removal in result.removals:
 		if len(removal_samples.setdefault(removal.pass_name, [])) >= SAMPLE_LIMIT:
 			continue
@@ -222,6 +222,9 @@ def result_report(input_path: pathlib.Path, output_path: pathlib.Path, result: p
 			"line": removal.line_number,
 			"text": removal.text,
 			"reason": removal.reason,
+			"source_line_id": removal.source_line_id,
+			"source_bbox": list(removal.source_bbox) if removal.source_bbox is not None else None,
+			"source_font_size": removal.source_font_size,
 		})
 	report = {
 		"pdf": str(input_path),
@@ -301,6 +304,13 @@ def write_removal_sidecar(output_path: pathlib.Path, removals: list[pdf_extract.
 		lines.append("")
 		for removal in groups[pass_name]:
 			lines.append(f"- page {removal.page_number}, source line {removal.line_number}: {removal.reason}")
+			if removal.source_line_id is not None:
+				lines.append(f"  - extracted line id: {removal.source_line_id}")
+			if removal.source_bbox is not None:
+				bbox_text = ", ".join(f"{value:.4f}" for value in removal.source_bbox)
+				lines.append(f"  - normalized page bbox: {bbox_text}")
+			if removal.source_font_size is not None:
+				lines.append(f"  - source font size: {removal.source_font_size:g}")
 			lines.append("```text")
 			lines.append(removal.text)
 			lines.append("```")

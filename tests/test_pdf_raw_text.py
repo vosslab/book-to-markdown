@@ -3,10 +3,9 @@
 import pathlib
 
 import pymupdf
+import pytest
 
 import cleanup.layout
-import pdf_extract.models
-import pdf_extract.page_cleanup
 import pdf_extract.raw_text
 
 
@@ -29,6 +28,64 @@ def test_raw_text_preserves_explicit_superscript_and_ordinary_layout(tmp_path: p
 
 	assert len(results) == 1
 	assert results[0].text == "Ordinary prose 10 ^{9} citation 7\n\nNext line has spaced text"
+
+
+#============================================
+def test_raw_text_preserves_source_control_only_lines_and_geometry(
+		tmp_path: pathlib.Path,
+		monkeypatch: pytest.MonkeyPatch,
+	) -> None:
+	"""Native tab, CR, VT, and FF lines survive while empty and space-only layout is skipped."""
+	controls = ("\t", "\r", "\v", "\f")
+	line_texts = ("", "   ", *controls, "Ordinary text")
+	lines = []
+	for line_index, line_text in enumerate(line_texts):
+		characters = [
+			{
+				"c": character,
+				"bbox": (line_index * 10, 20, line_index * 10 + 2, 22),
+			}
+			for character in line_text
+		]
+		lines.append({
+			"spans": [{
+				"chars": characters,
+				"bbox": (line_index * 10, 20, line_index * 10 + 2, 22),
+				"size": 8,
+				"font": "Helvetica",
+				"flags": 0,
+			}],
+		})
+	page_data = {"blocks": [{"type": 0, "lines": lines}]}
+
+	class FakePage:
+		rect = pymupdf.Rect(0, 0, 100, 100)
+		rotation_matrix = pymupdf.Matrix(1, 0, 0, 1, 0, 0)
+
+		def get_text(self, mode: str, flags: int | None = None) -> dict | list:
+			return page_data if mode == "rawdict" else []
+
+	class FakeDocument:
+		page_count = 1
+
+		def __getitem__(self, page_number: int) -> FakePage:
+			return FakePage()
+
+		def close(self) -> None:
+			return None
+
+	monkeypatch.setattr(pdf_extract.raw_text.pymupdf, "open", lambda _path: FakeDocument())
+
+	results = pdf_extract.raw_text.extract_raw_text(tmp_path / "source.pdf", [0])
+	page = results[0]
+	control_records = [record for record in page.line_provenance if record.text in controls]
+
+	assert page.text == "\n".join((*controls, "Ordinary text"))
+	assert [record.text for record in control_records] == list(controls)
+	assert [record.line_id for record in control_records] == [0, 1, 2, 3]
+	assert all(record.bbox is not None for record in control_records)
+	assert all(record.source == "raw_text" for record in control_records)
+	assert len(page.line_provenance) == 5
 
 
 #============================================
@@ -85,44 +142,8 @@ def test_raw_text_preserves_block_boundary_for_cleaner_reflow(tmp_path: pathlib.
 	assert results[0].text == "Abstract\n\nWrapped prose starts\nand continues within one text block."
 	assert cleaned == "Abstract\n\nWrapped prose starts and continues within one text block.\n"
 	assert results[0].source == "raw_text"
+	assert [record.text for record in results[0].line_provenance] == results[0].text.splitlines()
+	assert all(record.bbox is not None for record in results[0].line_provenance if record.text)
 
 
 #============================================
-def test_running_heads_keep_unique_numbered_openers_and_remove_repeated_labels() -> None:
-	"""Distinct chapter and appendix labels survive while recurrent labels are removed."""
-	labels = [
-		"CHAPTER 1", "CHAPTER 2", "CHAPTER 3", "CHAPTER 4", "CHAPTER 5",
-		"CHAPTER 1", "CHAPTER 1", "APPENDIX 1", "APPENDIX 2", "APPENDIX 1",
-		"APPENDIX 1",
-	]
-	pages = [
-		pdf_extract.models.PageResult(
-			page_number=index,
-			text=f"{label}\nUnique prose {chr(65 + index)}.",
-			source="raw_text",
-			embedded_words=10,
-			ocr_words=0,
-		)
-		for index, label in enumerate(labels)
-	]
-	defaults: dict[str, int | float] = {
-		"min_recurrence": 3,
-		"edge_distance": 2,
-		"edge_fraction": 0.70,
-		"max_length": 90,
-	}
-	removals: list[pdf_extract.models.Removal] = []
-
-	decisions = pdf_extract.page_cleanup.remove_running_heads(pages, removals, defaults)
-	remaining_labels = [
-		page.text.splitlines()[0]
-		for page in pages
-		if page.text.startswith(("CHAPTER ", "APPENDIX "))
-	]
-
-	assert remaining_labels == [
-		"CHAPTER 2", "CHAPTER 3", "CHAPTER 4", "CHAPTER 5", "APPENDIX 2",
-	]
-	assert {decision.template for decision in decisions if decision.disposition == "delete"} == {
-		"CHAPTER 1", "APPENDIX 1",
-	}

@@ -2,6 +2,55 @@
 
 All notable changes to this project are documented in this file.
 
+## 2026-10-29
+
+### Fixes and Maintenance
+
+- Keep corpus staging inventory and cleanup guidance with the corpus workflow rather than the
+  general-purpose conversion tools documentation.
+- Clarify that corpus conversion and review use the tool repository read-only; tool changes belong
+  to explicitly assigned tool-maintenance work.
+- Preserve page headings when repeated running heads occur in a neighboring column by requiring
+  conservative horizontal overlap with the attributed text line.
+- Read following body-line context once per source line during running-head classification.
+- Simplify PDF region inspection descriptor-failure handling and trim speculative tests while
+  retaining source-bound reporting, exclusive output creation, and cleanup of invocation-owned
+  output after write failure.
+- Split PDF raw extraction checks from page cleanup and provenance checks by responsibility.
+
+## 2026-10-26
+
+### Fixes and Maintenance
+
+- Preserve PDF text-layer lines containing source tab, CR, VT, or FF glyphs while continuing to
+  filter empty and ordinary ASCII-space-only layout lines.
+- Align PDF page cleanup and Markdown heading demotion with LF-delimited source lines so embedded
+  control glyphs retain their text and provenance; preserve decoded CR glyphs as page content;
+  avoid synthesizing headings from ambiguous numbered table rows and discard mismatched line
+  provenance without changing page text.
+- Preserve decoded tab, CR, VT, and FF glyphs at PDF line, page, and Markdown block boundaries;
+  split blocks only on LF-separated blank lines containing ordinary spaces, and trim only ASCII
+  spaces and LF at the final document boundary.
+- Preserve decoded trailing controls through source-H1 demotion in the final PDF conversion path.
+- Restrict page-number and picture-adjacency layout checks to ASCII spaces; preserve malformed
+  page text on no-op picture cleanup and retain source-line provenance for valid number removals.
+- Restrict picture marker padding to ASCII spaces so control-bearing markers remain source text.
+
+## 2026-10-25
+
+### Additions and New Features
+
+- Add optional `tools/pdf_region_text.py` inspection for positioned words and boundary crossings
+  in explicitly bounded PDF regions; its source-bound JSON is evidence, not semantic row grouping
+  or a fidelity claim.
+
+### Fixes and Maintenance
+
+- Treat dangling pending symlinks as occupied during both final new-title publication checks,
+  preserving the staged candidate and rolling back only an invocation-owned canonical link.
+- Use native or OCR line geometry and nearby body-line evidence to remove supported PDF running
+  heads while preserving ambiguous occurrences for review; report each occurrence's evidence.
+
 ## 2026-10-22
 
 ### Fixes and Maintenance

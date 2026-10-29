@@ -4,6 +4,47 @@ import dataclasses
 
 
 #============================================
+def normalize_line_provenance(
+		records: list["PageLineProvenance"],
+	) -> tuple[str, list["PageLineProvenance"]]:
+	"""Normalize exact line records with the same whitespace rules as page text."""
+	cleaned_records: list[PageLineProvenance] = []
+	for record in records:
+		for line in record.text.split("\n"):
+			cleaned_records.append(dataclasses.replace(record, text=line.rstrip(" ")))
+	while cleaned_records and not cleaned_records[0].text:
+		cleaned_records.pop(0)
+	while cleaned_records and not cleaned_records[-1].text:
+		cleaned_records.pop()
+	collapsed_records: list[PageLineProvenance] = []
+	blank_count = 0
+	for record in cleaned_records:
+		if not record.text:
+			blank_count += 1
+			if blank_count > 2:
+				continue
+		else:
+			blank_count = 0
+		collapsed_records.append(record)
+	text = "\n".join(record.text for record in collapsed_records)
+	return text, collapsed_records
+
+
+#============================================
+@dataclasses.dataclass
+class PageLineProvenance:
+	"""Describe the extracted source evidence for one exact output line."""
+	text: str
+	line_id: int
+	source: str
+	block_index: int | None = None
+	bbox: tuple[float, float, float, float] | None = None
+	font_size: float | None = None
+	font_names: tuple[str, ...] = ()
+	font_flags: tuple[int, ...] = ()
+
+
+#============================================
 @dataclasses.dataclass
 class PageResult:
 	"""Hold extracted text and diagnostics for one PDF page."""
@@ -12,6 +53,20 @@ class PageResult:
 	source: str
 	embedded_words: int
 	ocr_words: int
+	line_provenance: list[PageLineProvenance] | None = None
+
+	#============================================
+	def set_text_and_provenance(
+			self,
+			text: str,
+			line_provenance: list[PageLineProvenance] | None,
+		) -> None:
+		"""Set page text and retain records only when every LF-delimited line matches."""
+		lines = text.split("\n")
+		if line_provenance is not None and [record.text for record in line_provenance] != lines:
+			line_provenance = None
+		self.text = text
+		self.line_provenance = line_provenance
 
 
 #============================================
@@ -23,6 +78,9 @@ class Removal:
 	line_number: int
 	text: str
 	reason: str
+	source_line_id: int | None = None
+	source_bbox: tuple[float, float, float, float] | None = None
+	source_font_size: float | None = None
 
 
 #============================================
@@ -36,6 +94,7 @@ class RunningHeadDecision:
 	disposition: str
 	heading_level: int | None = None
 	promoted_count: int = 0
+	occurrences: list[dict[str, int | float | str | bool | None]] = dataclasses.field(default_factory=list)
 
 
 #============================================

@@ -300,7 +300,8 @@ def remove_snapshot(snapshot: pathlib.Path) -> None:
 #============================================
 def require_new_title_publication_preconditions(config: admission.PromotionConfig) -> None:
 	"""Require final new-title lifecycle absence before canonical linking."""
-	if config.expected_absent_pending.exists():
+	# ASVS 15.4.2: Treat dangling symlinks as occupied paths in the locked lifecycle check.
+	if os.path.lexists(config.expected_absent_pending):
 		raise ValueError("expected absent pending path exists")
 	if config.destination.exists():
 		raise FileExistsError(f"canonical destination already exists: {config.destination}")
@@ -526,7 +527,7 @@ def publish_new_title(
 				admission.require_bound_admission(config, admitted_sha)
 				os.link(publication_snapshot.snapshot, config.destination)
 				canonical_created = True
-				if config.expected_absent_pending.exists():
+				if os.path.lexists(config.expected_absent_pending):
 					raise ValueError("expected absent pending path exists")
 				verify_canonical_commit(config.destination, admitted_sha)
 			except (OSError, ValueError):

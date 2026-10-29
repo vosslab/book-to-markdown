@@ -24,9 +24,23 @@ def normalize_text(text: str) -> str:
 
 
 #============================================
+def normalize_page_text(text: str) -> str:
+	"""Normalize LF-structured PDF page text while retaining source control glyphs."""
+	normalized_text = re.sub(r" +\n", "\n", text)
+	normalized_text = re.sub(r"\n{3,}", "\n\n", normalized_text)
+	normalized_text = normalized_text.strip(" \n")
+	return normalized_text
+
+
+#============================================
 def split_blocks(text: str) -> list[str]:
 	"""Split one page into nonempty Markdown blocks."""
-	blocks = [block.strip() for block in re.split(r"\n\s*\n", text) if block.strip()]
+	separator_pattern = r"\n[ ]*\n+"
+	blocks: list[str] = []
+	for block in re.split(separator_pattern, text):
+		stripped_block = block.strip(" \n")
+		if stripped_block:
+			blocks.append(stripped_block)
 	return blocks
 
 
@@ -81,16 +95,16 @@ def flatten_pages(results: list[pdf_extract.models.PageResult], join_seams: bool
 				output_blocks[candidate_index] += " " + blocks.pop(0)
 				seams_joined += 1
 		output_blocks.extend(blocks)
-	markdown_text = "\n\n".join(output_blocks).strip() + "\n"
+	markdown_text = "\n\n".join(output_blocks).strip(" \n") + "\n"
 	return markdown_text, seams_seen, seams_joined
 
 
 #============================================
 def demote_source_h1s(markdown_text: str) -> str:
 	"""Reserve H1 for the canonical PDF metadata title without changing code."""
-	lines = markdown_text.splitlines()
+	lines = markdown_text.split("\n")
 	fenced, _unclosed = markdown_quality.fenced_line_numbers(lines)
 	for index, line in enumerate(lines):
 		if index not in fenced and re.match(r"^#\s+", line):
 			lines[index] = "#" + line
-	return "\n".join(lines).rstrip() + "\n"
+	return "\n".join(lines).rstrip(" \n") + "\n"
